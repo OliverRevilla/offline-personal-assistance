@@ -1,0 +1,15 @@
+# Override para exponer la GPU (vía NVIDIA Container Toolkit) al contenedor de Ollama.
+# Uso: docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
+#
+# Requiere NVIDIA Container Toolkit instalado en el host (Linux/WSL2) y configurado como
+# runtime de Docker. Solo Ollama recibe la GPU: STT/TTS/embeddings corren en CPU por diseño
+# (ver docs/ARCHITECTURE.md, sección "Presupuesto de recursos").
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

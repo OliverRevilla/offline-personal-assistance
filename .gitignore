@@ -216,3 +216,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- offline-personal-assistance ---
+
+# Node / Next.js (apps/desktop)
+node_modules/
+apps/desktop/.next/
+apps/desktop/out/
+
+# Tauri build artifacts
+apps/desktop/src-tauri/target/
+
+# Vault de Obsidian real del usuario (nunca se commitea)
+vault/*
+!vault/README.md
+
+# Datos locales de Docker (volúmenes montados en bind, no named volumes)
+docker/**/data/
+qdrant_storage/
+ollama_models/
+
