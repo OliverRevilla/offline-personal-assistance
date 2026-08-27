@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "buscar_nota",
+    "description": "Busca notas del vault relevantes semánticamente a una consulta explícita del usuario. Devuelve una lista de coincidencias con su ruta, título y un fragmento del contenido.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "consulta": {
+          "type": "string",
+          "description": "Texto o pregunta a buscar en el vault."
+        }
+      },
+      "required": ["consulta"]
+    }
+  }
+}

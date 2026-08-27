@@ -1,4 +1,4 @@
-"""Cliente manual de prueba para el WS de chat (Fase 1 del roadmap).
+"""Cliente manual de prueba para el WS de chat (Fases 1-3 del roadmap).
 
 Uso:
     python scripts/test_ws_chat.py [ws://localhost:8000/ws/chat]
@@ -37,6 +37,17 @@ async def main() -> None:
                     continue
                 if tipo == "token":
                     print(msg["texto"], end="", flush=True)
+                elif tipo == "tool_call":
+                    print(f"\n[tool] {msg['nombre']}({msg['argumentos']})")
+                elif tipo == "tool_result":
+                    print(f"[tool result] {msg['nombre']} -> {msg['resultado']}")
+                elif tipo == "confirmacion_requerida":
+                    print(f"\n[confirmación requerida] {msg['nombre']}({msg['argumentos']})")
+                    respuesta = await loop.run_in_executor(None, input, "¿Aprobás? (s/n): ")
+                    aprobado = respuesta.strip().lower() in ("s", "si", "sí", "y", "yes")
+                    await ws.send(
+                        json.dumps({"tipo": "confirmacion_respuesta", "id": msg["id"], "aprobado": aprobado})
+                    )
                 elif tipo == "turn_end":
                     print("\n")
                     break

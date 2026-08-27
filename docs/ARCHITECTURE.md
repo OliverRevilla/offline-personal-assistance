@@ -63,25 +63,27 @@ sequenceDiagram
 
 ### 3.1 WebSocket (frontend ↔ orchestrator)
 Una sola conexión WS por sesión, multiplexando dos tipos de frame:
-- **Frames de control (texto/JSON)**: `{"tipo": "transcript_partial"|"transcript_final"|"token"|"turn_start"|"turn_end"|"tool_call"|"error", ...}`
+- **Frames de control (texto/JSON)**: `{"tipo": "transcript_partial"|"transcript_final"|"user_message"|"token"|"turn_start"|"turn_end"|"tool_call"|"tool_result"|"confirmacion_requerida"|"confirmacion_respuesta"|"error", ...}`
 - **Frames binarios**: audio entrante (mic → backend) y audio saliente (Piper → frontend), diferenciados por un byte de cabecera (`0x01` = audio_in, `0x02` = audio_out).
 
 Este framing es un **contrato compartido** entre `frontend-engineer` y `backend-engineer`: cualquier cambio se refleja en este documento en el mismo commit que el código.
 
 ### 3.2 Tool calling (LLM ↔ ejecución real)
 Ollama expone tool calling nativo (formato compatible OpenAI). El orchestrator:
-1. Envía el schema de tools disponibles junto al prompt.
-2. Si el LLM responde con un `tool_call`, el `backend-engineer` lo transporta al `integration-engineer`, quien ejecuta la tool contra el vault (sandboxed).
-3. El resultado se re-inyecta como `tool_result` y el LLM continúa el stream.
+1. Envía el schema de tools disponibles junto al prompt (`prompts/tools/*.json`, cargados por `app/tools/registry.py`).
+2. Si el LLM responde con uno o más `tool_call`, el orchestrator los ejecuta contra el vault (sandboxed, `app/tools/vault_tools.py`) — hasta `MAX_TOOL_ITERATIONS` rondas por turno.
+3. **Tools destructivas** (hoy solo `actualizar_nota`, la única que sobrescribe contenido existente): antes de ejecutarla, el servidor envía `{"tipo": "confirmacion_requerida", "id", "nombre", "argumentos"}` y pausa ese turno hasta recibir `{"tipo": "confirmacion_respuesta", "id", "aprobado"}` del cliente. Si `aprobado` es `false`, la tool no se ejecuta y el LLM recibe un `tool_result` indicándolo.
+4. El resultado (o el rechazo) se re-inyecta como mensaje `role: tool` y el LLM continúa el stream.
+5. **Auditabilidad**: `crear_nota` y `actualizar_nota` dejan constancia en `<vault>/.asistente/audit.jsonl`; `actualizar_nota` además guarda el contenido previo en `<vault>/.asistente/backups/` antes de sobrescribir. Esa carpeta está excluida del indexado RAG (empieza con `.`) y las tools no pueden apuntar ahí (ver `resolve_vault_path`).
 
-Tools mínimas de la Fase 3 del roadmap: `buscar_nota`, `crear_nota`, `actualizar_nota`, `listar_tareas`.
+Tools de la Fase 3: `buscar_nota`, `crear_nota`, `actualizar_nota`, `listar_tareas`.
 
 ### 3.3 RAG (LLM ↔ Qdrant)
-Pipeline de indexación (offline/batch, disparado por cambios en el vault):
+Pipeline de indexación (manual, `python -m app.rag.indexer`; full reindex, no incremental — ver [ADR 0001](adr/0001-reindex-completo-vs-incremental.md)):
 `vault/*.md → chunking → nomic-embed-text (Ollama) → upsert Qdrant (payload: path, título, heading)`
 
-Pipeline de consulta (por turno de conversación):
-`query del usuario → embed → búsqueda top-k en Qdrant → chunks inyectados en el prompt del LLM`
+Pipeline de consulta (por turno de conversación, no persiste el contexto RAG en el historial — solo se inyecta para ese turno):
+`query del usuario → embed → búsqueda top-k en Qdrant → chunks inyectados en el prompt del LLM, citando la nota de origen`
 
 ## 4. Gestión de VRAM (responsabilidad cruzada software-architect / devops-engineer)
 - Ollama debe configurarse con un `keep_alive` explícito — no infinito por default — para poder liberar VRAM si el sistema detecta presión de memoria.

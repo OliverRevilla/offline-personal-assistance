@@ -1,0 +1,130 @@
+# Guía de testing y cierre — offline-personal-assistance
+
+## 1. Qué existe hoy
+
+| Fase | Estado | Qué hace |
+|---|---|---|
+| 0 — Bootstrap & Infra | ✅ | `docker-compose` (Ollama + Qdrant + orchestrator), scripts de setup |
+| 1 — Backend esqueleto + chat de texto | ✅ | FastAPI + WS, streaming de Ollama |
+| 2 — RAG sobre el vault | ✅ | Qdrant + `nomic-embed-text`, indexado manual, citación de notas |
+| 3 — Tool calling | ✅ | `buscar_nota`, `crear_nota`, `actualizar_nota` (con confirmación), `listar_tareas` |
+| 4 — STT (oídos) | ⬜ | Falta |
+| 5 — TTS (boca) | ⬜ | Falta |
+| 6 — Frontend Tauri + Next.js | ⬜ | Falta |
+| 7 — Hardening / observabilidad | ⬜ | Falta |
+| 8 — Empaquetado y distribución | ⬜ | Falta |
+
+Detalle completo de cada fase: `docs/ROADMAP.md` en el repo (incluye una sección de "posibles incorporaciones futuras", como conectar tools de un MCP externo — anotada, no implementada). Arquitectura y protocolo WS: `docs/ARCHITECTURE.md`.
+
+## 2. Requisitos antes de empezar
+
+- Docker + Docker Compose v2 (`docker compose version`).
+- Si vas a usar GPU: NVIDIA Container Toolkit instalado y funcionando en el host (Linux/WSL2). En Windows puro sin WSL2, Ollama en Docker **no** va a ver la GPU — o corrés Ollama nativo en Windows (con su propio soporte CUDA) y apuntás `OLLAMA_HOST` a ese proceso, o usás WSL2.
+- Python 3.11+ para correr el orchestrator fuera de Docker (recomendado mientras se itera — más rápido que reconstruir la imagen en cada cambio).
+
+## 3. Walkthrough completo: de cero hasta validar las 4 fases hechas
+
+Todo esto asume una máquina limpia, sin nada corriendo todavía. Los checkpoints (`✔ Fase N`) son literalmente los criterios de "hecho" de `docs/ROADMAP.md` — si alguno falla, no tiene sentido seguir al siguiente paso.
+
+### 3.1 Clonar y configurar
+
+```bash
+cd offline-personal-assistance
+cp .env.example .env
+```
+
+Revisá `.env`: si Ollama corre nativo en Windows/host (no en Docker) y el orchestrator sí corre en Docker, `OLLAMA_HOST` va a necesitar la IP del host en vez de `localhost`.
+
+### 3.2 Levantar la infraestructura (✔ Fase 0)
+
+```bash
+docker compose -f docker/docker-compose.yml up -d ollama qdrant
+# con GPU (Linux/WSL2 + NVIDIA Container Toolkit): agregar -f docker/docker-compose.gpu.yml
+
+./scripts/setup.sh      # o scripts\setup.ps1 en Windows
+# descarga el modelo LLM + nomic-embed-text, e inicializa la colección de Qdrant
+
+docker compose -f docker/docker-compose.yml exec ollama ollama run qwen2.5:7b-instruct-q4_K_M
+```
+
+**✔ Fase 0 si:** el modelo responde en esa última línea (Ctrl+D o `/bye` para salir). Si usaste `-f docker-compose.gpu.yml`, confirmá que usó GPU (en el host: `nvidia-smi` debería mostrar el proceso de `ollama` mientras responde).
+
+### 3.3 Backend + chat de texto (✔ Fase 1)
+
+```bash
+cd apps/orchestrator
+python -m venv .venv && .venv\Scripts\activate     # Windows; en Linux/WSL2: source .venv/bin/activate
+pip install -e ".[dev]"
+cp ../../.env.example .env
+
+uvicorn app.main:app --reload
+```
+
+En otra terminal, desde la raíz del repo:
+
+```bash
+python scripts/test_ws_chat.py
+```
+
+Escribí cualquier mensaje.
+
+**✔ Fase 1 si:** ves la respuesta del LLM apareciendo token por token en la terminal.
+
+### 3.4 RAG sobre el vault (✔ Fase 2)
+
+Con el servidor todavía arriba, en otra terminal (con el venv de `apps/orchestrator` activado):
+
+```bash
+cd apps/orchestrator
+python -m app.rag.indexer
+```
+
+Es un reindexado completo (recrea la colección de Qdrant desde cero cada vez — no incremental, ver `docs/adr/0001-reindex-completo-vs-incremental.md`). Corré esto de nuevo cada vez que cambies el contenido del vault y quieras que la búsqueda semántica se entere.
+
+Volvé a `scripts/test_ws_chat.py` (podés seguir usando la misma sesión) y preguntá:
+
+> ¿cuál es el nombre en clave del proyecto?
+
+**✔ Fase 2 si:** la respuesta se basa en `notas-de-prueba.md` (el vault de prueba que trae el repo) y la cita explícitamente.
+
+### 3.5 Tool calling (✔ Fase 3)
+
+Seguí en la misma sesión de `test_ws_chat.py`:
+
+1. *"Creame una nota en `pruebas/nota-tool.md` que diga 'hola desde el asistente'"* → invoca `crear_nota` sin pedir confirmación (no sobrescribe nada). Verificá que aparezca `vault/pruebas/nota-tool.md`.
+2. *"Cambiá el contenido de `notas-de-prueba.md` a algo distinto"* → el cliente va a mostrar `[confirmación requerida]` y te pide `s`/`n` por consola.
+   - Si aprobás: se sobrescribe y queda un backup en `vault/.asistente/backups/`.
+   - Si rechazás: el archivo no cambia y el asistente te lo cuenta en su respuesta.
+3. Pedile que liste tareas pendientes ("¿qué tareas tengo pendientes?") → invoca `listar_tareas`, que lee cualquier `- [ ]`/`- [x]` de las notas del vault (si el vault de prueba no tiene ninguna todavía, agregá una a mano en `notas-de-prueba.md` antes de probar esto).
+4. Revisá `vault/.asistente/audit.jsonl` — debería tener una línea por cada `crear_nota`/`actualizar_nota` que ejecutaste en los pasos 1 y 2.
+
+**✔ Fase 3 si:** el paso 2 efectivamente te pidió confirmación antes de tocar el archivo (no lo hizo directo), y el audit log tiene las entradas esperadas.
+
+### 3.6 Correr los tests automatizados
+
+```bash
+cd apps/orchestrator
+pytest
+```
+
+Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan la validación manual de arriba, pero conviene correrlos antes de dar por cerrada una sesión de trabajo.
+
+## 4. Observaciones importantes mientras testeás
+
+- **El reindexado RAG es manual y completo**, no incremental ni automático (no hay watcher de archivos). El tool calling sí opera sobre el archivo real al instante; es solo la búsqueda semántica automática la que queda desactualizada hasta el próximo `python -m app.rag.indexer`.
+- **`VAULT_PATH` apunta al vault de prueba del repo por default** (`../../vault` desde `apps/orchestrator`). Para tu vault real de Obsidian, cambiá `VAULT_PATH` en tu `.env` local a la ruta absoluta real — y no la commitees, `.env` ya está en `.gitignore`.
+- **Si corrés el orchestrator vía Docker**: el `docker-compose.yml` monta `../vault` como `/vault` **en lectura/escritura** (desde la Fase 3 el asistente necesita poder crear/editar notas ahí). Para tu vault real, un `docker-compose.override.yml` local (no versionado) sobreescribiendo ese volumen.
+- **Sandboxing de las tools**: `crear_nota`/`actualizar_nota` no pueden escribir fuera del vault (path traversal bloqueado) ni dentro de `vault/.asistente/` (reservado para el audit log y los backups). Un error de "ruta fuera del vault" o "ruta reservada" es este chequeo funcionando, no un bug.
+- **La confirmación de `actualizar_nota` es síncrona**: mientras el servidor espera tu `s`/`n`, ese turno de WS queda bloqueado. Documentado en `docs/adr/0002-confirmacion-sincrona-para-tools-destructivas.md` — limitación conocida, no algo para "arreglar" sin pensar el trade-off primero.
+- **Presupuesto de VRAM (8GB)**: solo el LLM usa GPU sostenida; STT/TTS (fases 4-5) y los embeddings corren en CPU. No muevas nada a GPU sin pasar por un ADR.
+- **`OLLAMA_KEEP_ALIVE`** (default `5m`): si cada mensaje después de una pausa tarda por recarga del modelo, subilo; si la VRAM anda justa, bajalo.
+- **`packages/rag-engine/` sigue vacío a propósito** — la lógica vive en `apps/orchestrator/app/rag/` hasta que exista un segundo consumidor real.
+- **Convención de nombres**: el código evita prefijos con guion bajo (`_nombre`) para "privado" — si ves uno en algo nuevo que se agregue, no es intencional, avisá para corregirlo.
+- **Conexión a un MCP externo**: quedó anotada en `docs/ROADMAP.md` como incorporación futura, no implementada — tensiona con el diseño "100% offline" del proyecto, así que no se agrega sin un ADR que resuelva toggle offline/online, degradación sin red, y qué datos pueden salir de la máquina.
+
+## 5. Pendiente para "finalizar" (no hacer todavía sin criterio)
+
+- No hay tests de integración end-to-end reales todavía (trabajo explícito de la Fase 7, agente `integration-engineer`). Lo que hay son tests unitarios sueltos (`test_health.py`, `test_chunking.py`, `test_vault_tools.py`, `test_tool_registry.py`).
+- No hay CI configurado — correr `pytest` manualmente en `apps/orchestrator` antes de dar por buena una fase.
+- Nada de esto está pensado para multi-usuario ni exposición fuera de tu máquina — si aparece la tentación de "exponerlo en la red" o "agregar login", eso es scope creep respecto al roadmap actual.
+- Los agentes de desarrollo (`.claude/agents/` en el repo) tienen la responsabilidad de cada área — si estás retomando esto después de un tiempo, es más rápido pedirle a `software-architect` que audite el estado contra `docs/ARCHITECTURE.md` que releer todo el código de cero.

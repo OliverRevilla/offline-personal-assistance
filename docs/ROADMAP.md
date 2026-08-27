@@ -54,3 +54,9 @@ Cada fase cierra con un commit/tag independiente y un criterio de "hecho" verifi
 ---
 
 **Nota de alcance:** ninguna fase agrega orquestación multi-usuario, autenticación remota, ni despliegue en la nube — el sistema es mono-usuario, local y offline por diseño. Si en algún punto se propone algo de eso, es una señal de scope creep y debe pasar por un ADR (`docs/adr/`) antes de aceptarse.
+
+## Posibles incorporaciones futuras (no planificadas, no forman parte de ninguna fase)
+
+Ideas anotadas para evaluar más adelante, deliberadamente fuera del roadmap actual hasta que se decidan con su propio ADR:
+
+- **Conexión a servidores MCP externos**: el orchestrator (no el LLM en sí) actuaría como cliente MCP, sumando las tools que exponga un servidor MCP al mismo array de schemas que hoy arma `app/tools/registry.py` para `buscar_nota`/`crear_nota`/etc. Tensiona directamente con la nota de alcance de arriba (offline por diseño): requeriría que sea una fuente de tools opcional/togglable, con degradación explícita cuando no hay red, y una decisión consciente de qué datos del vault/la conversación pueden salir de la máquina hacia ese servidor. No implementar sin un ADR que resuelva esos tres puntos primero.

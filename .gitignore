@@ -227,9 +227,11 @@ apps/desktop/out/
 # Tauri build artifacts
 apps/desktop/src-tauri/target/
 
-# Vault de Obsidian real del usuario (nunca se commitea)
+# Vault de Obsidian real del usuario (nunca se commitea) — se exceptúan el README y la
+# nota de prueba que ship con el repo para poder probar el pipeline de RAG (Fase 2).
 vault/*
 !vault/README.md
+!vault/notas-de-prueba.md
 
 # Datos locales de Docker (volúmenes montados en bind, no named volumes)
 docker/**/data/

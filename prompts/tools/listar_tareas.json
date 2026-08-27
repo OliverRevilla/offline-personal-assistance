@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "listar_tareas",
+    "description": "Lista las tareas (checkboxes de markdown '- [ ]' / '- [x]') encontradas en todas las notas del vault, con la ruta de la nota donde aparece cada una.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "solo_pendientes": {
+          "type": "boolean",
+          "description": "Si es true, excluye las tareas ya marcadas como hechas. Por defecto false."
+        }
+      },
+      "required": []
+    }
+  }
+}

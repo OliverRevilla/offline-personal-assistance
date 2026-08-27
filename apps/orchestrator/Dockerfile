@@ -1,9 +1,13 @@
+# NOTA: build context = raíz del repo (ver docker/docker-compose.yml), no apps/orchestrator,
+# porque también se copia /prompts dentro de la imagen.
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY app ./app
+COPY apps/orchestrator/pyproject.toml ./
+COPY apps/orchestrator/app ./app
+COPY prompts ./prompts
 
 RUN pip install --no-cache-dir .
 

@@ -1,0 +1,13 @@
+# Build context de docker/docker-compose.yml es la raíz del repo (ver apps/orchestrator/Dockerfile).
+.git/
+.claude/
+docs/
+apps/desktop/
+node_modules/
+**/__pycache__/
+**/*.pyc
+**/.venv/
+apps/orchestrator/tests/
+.env
+vault/*
+!vault/README.md

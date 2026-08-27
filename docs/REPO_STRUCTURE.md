@@ -10,7 +10,7 @@ offline-personal-assistance/
 │   │   │   ├── stt/            # faster-whisper + Silero VAD
 │   │   │   ├── tts/            # Piper-TTS + sentence buffering
 │   │   │   ├── llm/            # cliente Ollama, streaming, tool-calling loop
-│   │   │   ├── tools/          # ejecución real de tools contra el vault (integration-engineer)
+│   │   │   ├── tools/          # registry + ejecución real de tools contra el vault (sandboxed)
 │   │   │   └── rag/            # embeddings + cliente Qdrant (lead-ai-engineer)
 │   │   ├── tests/
 │   │   ├── pyproject.toml
@@ -22,7 +22,8 @@ offline-personal-assistance/
 │       └── package.json
 │
 ├── packages/
-│   ├── rag-engine/               # lógica de chunking/indexación reutilizable (CLI, benchmarks, tests aislados)
+│   ├── rag-engine/               # vacío por ahora: la lógica vive en apps/orchestrator/app/rag/
+│   │                             # hasta que exista un segundo consumidor real (ver su README)
 │   ├── voice-pipeline/           # wrappers de STT/VAD/TTS reutilizables fuera de FastAPI (benchmarks de latencia)
 │   └── shared-contracts/         # schemas compartidos (mensajes WS, tool schemas) — fuente única para Python/TS
 │
@@ -47,7 +48,7 @@ offline-personal-assistance/
 ├── .claude/
 │   └── agents/                   # subagentes de desarrollo (este documento los referencia)
 │
-├── vault/                        # (gitignored) vault de Obsidian local para desarrollo — nunca se commitea
+├── vault/                        # vault de Obsidian local para desarrollo (gitignored salvo un note de prueba)
 ├── .env.example
 ├── CLAUDE.md
 └── README.md
@@ -57,4 +58,4 @@ offline-personal-assistance/
 - `apps/*` son desplegables independientes (el orchestrator corre en Docker, el desktop se empaqueta con Tauri).
 - `packages/*` no se despliegan solos — son librerías consumidas por `apps/*`, pensadas para poder testear/benchmarkear STT/TTS/RAG fuera del servidor WS.
 - `prompts/*` son datos versionados, no código — cualquier cambio de prompt de sistema o de schema de tool es un diff legible en review, no un string embebido en `app/llm/`.
-- El vault real del usuario vive fuera del repo en producción; `vault/` solo existe como punto de montaje para desarrollo local y está en `.gitignore`.
+- El vault real del usuario vive fuera del repo en producción y nunca se commitea; `vault/` solo trackea un README y una nota de prueba mínima para poder validar el pipeline de RAG sin un vault real (ver [docs/adr/0001-reindex-completo-vs-incremental.md](adr/0001-reindex-completo-vs-incremental.md)).

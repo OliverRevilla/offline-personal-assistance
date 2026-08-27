@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "actualizar_nota",
+    "description": "Sobrescribe el contenido completo de una nota existente del vault. Operación destructiva: el sistema le pide confirmación explícita al usuario antes de ejecutarla, no hace falta pedirla en el texto de la respuesta.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ruta": {
+          "type": "string",
+          "description": "Ruta relativa al vault de la nota a actualizar. Debe existir (para crear una nota nueva usar crear_nota)."
+        },
+        "contenido": {
+          "type": "string",
+          "description": "Nuevo contenido completo en markdown que reemplaza al anterior."
+        }
+      },
+      "required": ["ruta", "contenido"]
+    }
+  }
+}

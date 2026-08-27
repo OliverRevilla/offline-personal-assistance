@@ -20,10 +20,24 @@ services:
 
   orchestrator:
     build:
-      context: ../apps/orchestrator
+      # Contexto = raíz del repo (no solo apps/orchestrator) porque la imagen también
+      # necesita /prompts para el system prompt versionado (ver docs/ARCHITECTURE.md).
+      context: ..
+      dockerfile: apps/orchestrator/Dockerfile
     container_name: opa-orchestrator
     env_file:
       - ../.env
+    environment:
+      # Overrides de rutas para el filesystem DEL CONTENEDOR (las de .env asumen CWD local).
+      - VAULT_PATH=/vault
+      - SYSTEM_PROMPT_PATH=/app/prompts/system/assistant.md
+      - TOOLS_SCHEMA_DIR=/app/prompts/tools
+    volumes:
+      # Bind mount de lectura/escritura al vault de prueba del repo: desde la Fase 3 el
+      # orchestrator necesita poder crear/editar notas (tool calling), no solo leerlas.
+      # Para apuntar a un vault real fuera del repo, sobreescribir este volumen en un
+      # docker-compose.override.yml.
+      - ../vault:/vault
     ports:
       - "8000:8000"
     depends_on:

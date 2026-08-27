@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "crear_nota",
+    "description": "Crea una nota nueva en el vault. Falla si ya existe una nota en esa ruta (para modificar una nota existente usar actualizar_nota). No requiere confirmación del usuario porque no puede sobrescribir nada.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ruta": {
+          "type": "string",
+          "description": "Ruta relativa al vault, ej. 'proyectos/idea.md'. Debe terminar en .md."
+        },
+        "contenido": {
+          "type": "string",
+          "description": "Contenido en formato markdown de la nota."
+        }
+      },
+      "required": ["ruta", "contenido"]
+    }
+  }
+}

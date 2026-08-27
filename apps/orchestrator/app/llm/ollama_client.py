@@ -1,23 +1,41 @@
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import httpx
 
 from app.core.config import settings
 
-# Placeholder de Fase 1 (sin RAG, sin tools todavía).
-# El system prompt "real" del asistente vivirá versionado en /prompts (Fase 2, lead-ai-engineer).
-SYSTEM_PROMPT = "Eres un asistente útil, conciso y que responde en español."
+
+def load_system_prompt() -> str:
+    path = Path(settings.system_prompt_path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"No se encontró el system prompt en {path.resolve()} "
+            "(configurable vía SYSTEM_PROMPT_PATH, ver .env.example)."
+        )
+    return path.read_text(encoding="utf-8").strip()
 
 
-async def stream_chat(messages: list[dict]) -> AsyncIterator[str]:
-    """Llama a Ollama /api/chat en modo streaming y va cediendo el contenido token a token."""
+SYSTEM_PROMPT = load_system_prompt()
+
+
+async def stream_chat(messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[dict]:
+    """Llama a Ollama /api/chat en modo streaming.
+
+    Cede eventos `{"type": "token", "content": str}` a medida que se genera texto, y
+    `{"type": "tool_calls", "calls": [...]}` si el modelo decide invocar una o más tools
+    (formato nativo de Ollama, compatible con el de OpenAI).
+    """
     payload = {
         "model": settings.ollama_llm_model,
         "messages": messages,
         "stream": True,
         "keep_alive": settings.ollama_keep_alive,
     }
+    if tools:
+        payload["tools"] = tools
+
     async with httpx.AsyncClient(base_url=settings.ollama_host, timeout=None) as client:
         async with client.stream("POST", "/api/chat", json=payload) as response:
             response.raise_for_status()
@@ -25,8 +43,15 @@ async def stream_chat(messages: list[dict]) -> AsyncIterator[str]:
                 if not line:
                     continue
                 chunk = json.loads(line)
-                content = chunk.get("message", {}).get("content", "")
+                message = chunk.get("message", {})
+
+                content = message.get("content", "")
                 if content:
-                    yield content
+                    yield {"type": "token", "content": content}
+
+                tool_calls = message.get("tool_calls")
+                if tool_calls:
+                    yield {"type": "tool_calls", "calls": tool_calls}
+
                 if chunk.get("done"):
                     break

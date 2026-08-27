@@ -22,4 +22,6 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d ollama qdra
 docker compose -f docker-compose.yml exec ollama ollama run qwen2.5:7b-instruct-q4_K_M
 ```
 
-El servicio `orchestrator` (Fase 1) también está definido en `docker-compose.yml`, pero durante desarrollo activo suele ser más rápido correrlo fuera de Docker (ver [apps/orchestrator/README.md](../apps/orchestrator/README.md)).
+El servicio `orchestrator` también está definido en `docker-compose.yml` (su build context es la raíz del repo, no `apps/orchestrator/`, porque la imagen también necesita `/prompts`), pero durante desarrollo activo suele ser más rápido correrlo fuera de Docker (ver [apps/orchestrator/README.md](../apps/orchestrator/README.md)).
+
+Montaje del vault (Fase 2-3): el contenedor de `orchestrator` monta `../vault` (el vault de prueba del repo) como `/vault`, en lectura/escritura — desde la Fase 3 el asistente puede crear/editar notas ahí (tool calling), no solo leerlas para RAG. Para apuntar a un vault real fuera del repo, hay que sobreescribir ese volumen en un `docker-compose.override.yml` local (no versionado) apuntando a la ruta real.
