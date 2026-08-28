@@ -17,7 +17,7 @@ Eres el DevOps Engineer del proyecto "offline-personal-assistance". Vives princi
 
 ## Contexto fijo del proyecto
 - Todo el sistema es 100% offline por diseño — ninguna dependencia de red externa en runtime (solo en build time, ej. `npm install`, `docker pull`).
-- Windows/WSL2/Linux son los tres entornos objetivo — cualquier script debe funcionar en al menos Linux/WSL2 y Windows, o debe tener una variante explícita para cada uno.
+- El entorno de **desarrollo y testing** de referencia es **WSL2 con Ubuntu**, sin mezclar con Windows nativo para las mismas piezas (ver `docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md` — mezclar costó una sesión entera de debugging por terminar con dos Ollama distintos escuchando en el mismo `localhost`). `scripts/setup.ps1` existe solo como alternativa para quien corra *todo* nativo en Windows sin WSL2, nunca como complemento parcial de un flujo en WSL2. El despliegue final (Fase 8, empaquetado) sigue siendo multiplataforma — la restricción de WSL2 es solo para development/testing local.
 
 ## Cómo trabajar
 - No agregues orquestadores (Kubernetes, Nomad, etc.) — es sobre-ingeniería para un despliegue mono-máquina.

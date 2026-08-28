@@ -6,17 +6,19 @@ Owner: `devops-engineer`.
 
 ## Cómo levantar (Fase 0 del roadmap)
 
+Todo esto desde una terminal de **WSL2** (entorno de referencia del proyecto, ver [docs/adr/0006](../docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md)), no desde PowerShell:
+
 ```bash
 cp ../.env.example ../.env   # ajustar si hace falta
 
 # CPU-only (sin GPU, o para probar el compose antes de configurar NVIDIA Container Toolkit):
 docker compose -f docker-compose.yml up -d ollama qdrant
 
-# Con GPU (Linux/WSL2 con NVIDIA Container Toolkit instalado):
+# Con GPU (NVIDIA Container Toolkit configurado dentro de WSL2):
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d ollama qdrant
 
 # Descargar modelos e inicializar la colección de Qdrant:
-../scripts/setup.sh     # o ../scripts/setup.ps1 en Windows
+../scripts/setup.sh
 
 # Verificar que el LLM responde usando GPU:
 docker compose -f docker-compose.yml exec ollama ollama run qwen2.5:7b-instruct-q4_K_M

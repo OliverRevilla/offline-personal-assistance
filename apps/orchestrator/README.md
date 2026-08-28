@@ -10,15 +10,17 @@ Chat de texto en streaming sobre Ollama vía WebSocket, con RAG sobre el vault (
 
 ## Cómo correr en local (sin Docker)
 
+Entorno de referencia: **WSL2 con Ubuntu** (ver [docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md](../../docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md)). Ollama, el venv y `uvicorn` corren todos dentro de la misma WSL2 — no mezclar con un Ollama nativo de Windows, ver ese ADR para el porqué.
+
 ```bash
 cd apps/orchestrator
-python -m venv .venv && source .venv/bin/activate   # en Windows: .venv\Scripts\activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp ../../.env.example .env                          # ajustar OLLAMA_HOST si Ollama no corre en localhost
+cp ../../.env.example .env
 uvicorn app.main:app --reload
 ```
 
-Requiere Ollama y Qdrant corriendo (local o vía `docker compose -f ../../docker/docker-compose.yml up -d ollama qdrant`), con el modelo LLM y el de embeddings ya descargados y la colección de Qdrant creada (`scripts/setup.sh` / `setup.ps1`, ver [docker/README.md](../../docker/README.md)).
+Requiere Ollama y Qdrant corriendo dentro de la misma WSL2 (local o vía `docker compose -f ../../docker/docker-compose.yml up -d ollama qdrant`, corrido también desde WSL2), con el modelo LLM y el de embeddings ya descargados y la colección de Qdrant creada (`scripts/setup.sh`, ver [docker/README.md](../../docker/README.md)).
 
 ## Indexar el vault (RAG)
 

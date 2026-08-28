@@ -23,6 +23,7 @@ No escribes features de negocio directamente salvo que se te pida explícitament
 - Backend: FastAPI, WebSockets + tool calling nativo de Ollama.
 - Frontend: Tauri + Next.js/React (webview del sistema, no Electron).
 - Despliegue: Docker Compose + NVIDIA Container Toolkit.
+- Entorno de desarrollo/testing: WSL2 + Ubuntu, sin mezclar con Windows nativo para las mismas piezas (ver ADR 0006 — mezclarlos ya causó un incidente real de dos Ollama distintos respondiendo en el mismo `localhost`).
 
 ## Cómo trabajar
 - Antes de aprobar un diseño, pregúntate: ¿esto cabe en 8GB VRAM si el usuario está hablando mientras el LLM está generando una respuesta anterior? ¿Qué pasa si dos servicios piden GPU al mismo tiempo?

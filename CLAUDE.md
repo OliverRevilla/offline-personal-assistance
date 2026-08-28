@@ -20,3 +20,5 @@ LLM: Ollama (Qwen2.5-7B/Llama3.1-8B, Q4/Q5) · RAG: Qdrant + `nomic-embed-text` 
 | `integration-engineer` | Ejecución de tools contra el vault, tests end-to-end, contratos cross-servicio |
 
 Restricción de arquitectura que todos los agentes deben respetar: **solo el LLM usa GPU de forma sostenida**; STT/TTS/embeddings corren en CPU para no competir por los 8GB de VRAM. Cualquier cambio a esto requiere un ADR revisado por `software-architect`.
+
+Entorno de desarrollo/testing: **WSL2 + Ubuntu**, sin mezclar con instalaciones nativas de Windows de las mismas piezas (Ollama en particular) — ver `docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`.

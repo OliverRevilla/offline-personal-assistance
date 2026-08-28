@@ -18,9 +18,10 @@ Detalle completo de cada fase: `docs/ROADMAP.md` en el repo — incluye una secc
 
 ## 2. Requisitos antes de empezar
 
-- Docker + Docker Compose v2 (`docker compose version`).
-- Si vas a usar GPU: NVIDIA Container Toolkit instalado y funcionando en el host (Linux/WSL2). En Windows puro sin WSL2, Ollama en Docker **no** va a ver la GPU — o corrés Ollama nativo en Windows (con su propio soporte CUDA) y apuntás `OLLAMA_HOST` a ese proceso, o usás WSL2.
-- **Python 3.11 o 3.12** para el venv de `apps/orchestrator` (prudencia general de compatibilidad con `ctranslate2`, no una certeza de que arregle nada por sí solo). Si te aparece `ModuleNotFoundError: pkg_resources` al levantar el server, **no es un tema de versión de Python** — ver la nota en 3.6 y `docs/adr/0005-pkg-resources-pin-setuptools.md` para el diagnóstico real (falta `setuptools` en el venv).
+- **Todo corre dentro de WSL2 con Ubuntu — sin excepciones ni mezclas.** No "un poco en PowerShell y un poco en WSL": Ollama, el venv de Python, `uvicorn`, y los comandos de `docker compose` corren *todos* desde la misma terminal de WSL2. Ver `docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md` — mezclar Windows nativo y WSL2 para piezas que necesitan hablarse entre sí (típicamente Ollama) hizo perder una sesión entera de debugging por tener **dos Ollamas distintos** escuchando en el mismo `localhost:11434`, cada uno desde su propio namespace de red, con modelos descargados de un solo lado.
+- Docker + Docker Compose v2 (`docker compose version`), con la integración de Docker Desktop con WSL2 activada (o el Docker Engine instalado directo dentro de la distro).
+- GPU: NVIDIA Container Toolkit configurado en WSL2 (no en Windows a secas). Confirmá con `nvidia-smi` corrido *desde dentro de WSL2* antes de asumir que el passthrough funciona.
+- **Python 3.11 o 3.12** para el venv de `apps/orchestrator` (prudencia de compatibilidad con `ctranslate2`; instalable en Ubuntu con `sudo apt install python3.12 python3.12-venv` si no viene por default). Si te aparece `ModuleNotFoundError: pkg_resources` al levantar el server, **no es un tema de versión de Python** — ver `docs/adr/0005-pkg-resources-pin-setuptools.md`.
 
 ## 3. Walkthrough completo: de cero hasta validar lo que está hecho
 
@@ -33,30 +34,33 @@ cd offline-personal-assistance
 cp .env.example .env
 ```
 
-Revisá `.env`: si Ollama corre nativo en Windows/host (no en Docker) y el orchestrator sí corre en Docker, `OLLAMA_HOST` va a necesitar la IP del host en vez de `localhost`.
+`OLLAMA_HOST=http://localhost:11434` del `.env.example` asume que Ollama corre dentro de la misma WSL2 (nativo ahí, o vía Docker con la integración de WSL2) — no lo cambies para apuntar a un Ollama de Windows nativo, esa mezcla es justamente la que causó el incidente documentado en `docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`.
 
 ### 3.2 Levantar la infraestructura (✔ Fase 0)
 
+Todo esto, desde una terminal de WSL2 (no PowerShell):
+
 ```bash
 docker compose -f docker/docker-compose.yml up -d ollama qdrant
-# con GPU (Linux/WSL2 + NVIDIA Container Toolkit): agregar -f docker/docker-compose.gpu.yml
+# con GPU (NVIDIA Container Toolkit configurado dentro de WSL2): agregar -f docker/docker-compose.gpu.yml
 
-./scripts/setup.sh      # o scripts\setup.ps1 en Windows
+./scripts/setup.sh
 # descarga el modelo LLM + nomic-embed-text, e inicializa la colección de Qdrant
 
 docker compose -f docker/docker-compose.yml exec ollama ollama run qwen2.5:7b-instruct-q4_K_M
 ```
 
+(`scripts/setup.ps1` existe solo para el caso de correr *todo* — Ollama incluido — nativo en Windows sin WSL2 en absoluto. No lo mezcles con pasos corridos en WSL2.)
+
 **✔ Fase 0 si:** el modelo responde en esa última línea (Ctrl+D o `/bye` para salir). Si usaste `-f docker-compose.gpu.yml`, confirmá que usó GPU (en el host: `nvidia-smi` debería mostrar el proceso de `ollama` mientras responde).
 
 ### 3.3 Backend + chat de texto (✔ Fase 1)
 
+Desde WSL2 (si tu `python3` por defecto no es 3.11/3.12: `sudo apt install python3.12 python3.12-venv` primero):
+
 ```bash
 cd apps/orchestrator
-# Windows, si tu "python"/"py" por defecto es 3.13+: instalá 3.12 aparte y usá el launcher
-# para elegirlo explícitamente. Confirmá qué versiones tenés con `py -0p`.
-py -3.12 -m venv .venv && .venv\Scripts\activate
-# Linux/WSL2 equivalente: python3.12 -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 
 pip install -e ".[dev]"
 cp ../../.env.example .env
@@ -108,31 +112,28 @@ Seguí en la misma sesión de `test_ws_chat.py`:
 
 ### 3.6 STT por micrófono (✔ Fase 4)
 
-El paquete `webrtcvad` compila una extensión en C al instalarse — si `pip install -e ".[dev]"` falla en Windows con un error de compilador (`Microsoft Visual C++ ... required`), probá con el fork que publica wheels precompiladas para Windows (`pip install webrtcvad-wheels` en vez de `webrtcvad`) antes de instalar Build Tools.
+El paquete `webrtcvad` compila una extensión en C al instalarse — en Ubuntu/WSL2, si `pip install -e ".[dev]"` falla compilándolo, instalá las herramientas de build primero: `sudo apt install build-essential python3.12-dev` y reintentá.
 
 La primera vez que arranques el servidor después de este cambio, va a tardar más en levantar: descarga el modelo de whisper (`WHISPER_MODEL_SIZE=base` por default) desde Hugging Face si no lo tenías cacheado — necesita red esa primera vez, después queda en caché local y arranca offline.
 
-Si `uvicorn app.main:app` falla con `ModuleNotFoundError: pkg_resources` (con o sin `--reload`, y persiste incluso con Python 3.12): **no es un problema de versión de Python** (eso lo descartamos — ver `docs/adr/0004-python-311-312-por-ctranslate2.md`, actualizado). Es que el venv no tiene `setuptools` instalado (el módulo `venv` de Python ya no lo instala solo desde hace un tiempo) y `faster-whisper`/`ctranslate2` todavía necesita `pkg_resources` en tiempo de ejecución. Diagnóstico y fix completo en `docs/adr/0005-pkg-resources-pin-setuptools.md`; en resumen, con un venv **recién recreado desde cero** (no reusado):
+Si `uvicorn app.main:app` falla con `ModuleNotFoundError: pkg_resources` (con o sin `--reload`, y persiste incluso con Python 3.12): **no es un problema de versión de Python** (ver `docs/adr/0004-python-311-312-por-ctranslate2.md`, actualizado). Es que el venv no tiene `setuptools` instalado y `faster-whisper`/`ctranslate2` todavía necesita `pkg_resources` en tiempo de ejecución. Diagnóstico y fix completo en `docs/adr/0005-pkg-resources-pin-setuptools.md`; en resumen, con un venv **recién recreado desde cero** (no reusado):
 
-```powershell
+```bash
 cd apps/orchestrator
-Remove-Item -Recurse -Force .venv
-py -3.12 -m venv .venv
-.venv\Scripts\activate
-python -c "import sys; print(sys.executable)"   # confirmá que apunta DENTRO de .venv, no a otro Python
+rm -rf .venv
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -c "import sys; print(sys.executable)"   # confirmá que apunta DENTRO de .venv
 pip install -e ".[dev]" -v
 python -c "import pkg_resources; print('setuptools ok')"   # smoke test ANTES de probar uvicorn
-uvicorn app.main:app
+uvicorn app.main:app --reload
 ```
 
 Si el smoke test (`import pkg_resources`) ya falla ahí, es un problema del Python/venv de esa máquina, no del código del repo — no tiene sentido seguir tocando dependencias del proyecto hasta que ese import aislado funcione.
 
-```bash
-cd apps/orchestrator
-uvicorn app.main:app --reload
-```
+Si en cambio el server levanta bien pero el chat responde `model '...' not found` aunque el modelo "esté pulleado": **confirmá desde la MISMA terminal de WSL2 donde corre uvicorn** (`curl http://localhost:11434/api/tags`) que el modelo aparece ahí — no alcanza con haberlo visto desde PowerShell/Windows. Ver `docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`: es posible tener dos Ollama corriendo en paralelo (uno nativo en Windows, otro en WSL2), cada uno con sus propios modelos, ambos respondiendo en `localhost:11434` pero cada uno en su propio namespace de red.
 
-En otra terminal, desde la raíz del repo:
+En otra terminal (también dentro de WSL2), desde la raíz del repo:
 
 ```bash
 python scripts/test_stt_mic.py
@@ -176,6 +177,7 @@ Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan 
 
 ## 4. Observaciones importantes mientras testeás
 
+- **Todo corre en WSL2 con Ubuntu, sin mezclar con Windows nativo** — esto costó una sesión entera de debugging (`docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`): tener Ollama instalado tanto nativo en Windows como dentro de WSL2 hace que `localhost:11434` resuelva a dos procesos completamente distintos según desde dónde lo llames, cada uno con sus propios modelos descargados. Un `Invoke-RestMethod` desde PowerShell puede funcionar perfecto mientras el orchestrator (corriendo en WSL2) recibe `model not found` para el mismo modelo — no es contradictorio, son dos servidores distintos. Si algo "funciona en una terminal pero no en otra", lo primero a sospechar es esto, no el código.
 - **El reindexado RAG es manual y completo**, no incremental ni automático (no hay watcher de archivos). El tool calling sí opera sobre el archivo real al instante; es solo la búsqueda semántica automática la que queda desactualizada hasta el próximo `python -m app.rag.indexer`.
 - **`VAULT_PATH` apunta al vault de prueba del repo por default** (`../../vault` desde `apps/orchestrator`). Para tu vault real de Obsidian, cambiá `VAULT_PATH` en tu `.env` local a la ruta absoluta real — y no la commitees, `.env` ya está en `.gitignore`.
 - **Si corrés el orchestrator vía Docker**: el `docker-compose.yml` monta `../vault` como `/vault` **en lectura/escritura** (desde la Fase 3 el asistente necesita poder crear/editar notas ahí). Para tu vault real, un `docker-compose.override.yml` local (no versionado) sobreescribiendo ese volumen.

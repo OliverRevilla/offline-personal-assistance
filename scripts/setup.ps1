@@ -1,3 +1,12 @@
+# ATENCIÓN: el entorno de desarrollo/testing de referencia de este proyecto es WSL2 + Ubuntu
+# (ver docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md) — el script real a usar ahí es
+# scripts/setup.sh, corrido desde una terminal de WSL2, NO este .ps1.
+#
+# Este .ps1 existe solo para el caso de correr TODO nativo en Windows sin WSL2 en absoluto
+# (Ollama incluido). Si mezclás este script con un Ollama/orchestrator corriendo dentro de
+# WSL2, vas a terminar con dos Ollama distintos escuchando en el mismo localhost:11434,
+# cada uno con sus propios modelos — exactamente el incidente que documenta el ADR 0006.
+#
 # Setup idempotente de Fase 0: descarga los modelos de Ollama y crea la colección de Qdrant.
 # Requiere que `docker compose up -d` (servicios ollama + qdrant) ya esté corriendo.
 
