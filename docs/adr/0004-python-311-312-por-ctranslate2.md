@@ -1,5 +1,7 @@
 # 0004 — Fijar el orchestrator a Python 3.11-3.12
 
+> **Actualización (refutada parcialmente):** el usuario downgradeó a Python 3.12 y el mismo `ModuleNotFoundError: pkg_resources` persistió, tanto con `uvicorn --reload` como sin él. Eso descarta la hipótesis de "ctranslate2 sin wheels para una versión de Python demasiado nueva" como causa raíz — 3.12 tiene soporte maduro de sobra. El tope de versión (`<3.13`) se mantiene por prudencia general, pero **no es el fix** de este error. Ver [ADR 0005](0005-pkg-resources-pin-setuptools.md) para el diagnóstico corregido.
+
 ## Contexto
 Probando el proyecto en una máquina con Python 3.14 recién instalado, `uvicorn app.main:app --reload` falla con `ModuleNotFoundError: pkg_resources` dentro del subproceso que crea el reloader (`SpawnProcess-1`). Instalar `setuptools` en el venv no lo resuelve.
 

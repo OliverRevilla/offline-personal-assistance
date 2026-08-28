@@ -20,7 +20,7 @@ Detalle completo de cada fase: `docs/ROADMAP.md` en el repo — incluye una secc
 
 - Docker + Docker Compose v2 (`docker compose version`).
 - Si vas a usar GPU: NVIDIA Container Toolkit instalado y funcionando en el host (Linux/WSL2). En Windows puro sin WSL2, Ollama en Docker **no** va a ver la GPU — o corrés Ollama nativo en Windows (con su propio soporte CUDA) y apuntás `OLLAMA_HOST` a ese proceso, o usás WSL2.
-- **Python 3.11 o 3.12 específicamente** (no 3.13/3.14) para el venv de `apps/orchestrator` — `ctranslate2` (dependencia de `faster-whisper`) no tiene wheels para versiones de Python muy nuevas todavía, y falla en runtime de formas confusas (`ModuleNotFoundError: pkg_resources` en el subproceso `SpawnProcess-1` de `uvicorn --reload`, entre otras). Ver `docs/adr/0004-python-311-312-por-ctranslate2.md`. Si tu Python por defecto es 3.13+, instalá 3.12 aparte y creá el venv apuntando a ese intérprete explícitamente (ver 3.3 más abajo).
+- **Python 3.11 o 3.12** para el venv de `apps/orchestrator` (prudencia general de compatibilidad con `ctranslate2`, no una certeza de que arregle nada por sí solo). Si te aparece `ModuleNotFoundError: pkg_resources` al levantar el server, **no es un tema de versión de Python** — ver la nota en 3.6 y `docs/adr/0005-pkg-resources-pin-setuptools.md` para el diagnóstico real (falta `setuptools` en el venv).
 
 ## 3. Walkthrough completo: de cero hasta validar lo que está hecho
 
@@ -110,7 +110,20 @@ El paquete `webrtcvad` compila una extensión en C al instalarse — si `pip ins
 
 La primera vez que arranques el servidor después de este cambio, va a tardar más en levantar: descarga el modelo de whisper (`WHISPER_MODEL_SIZE=base` por default) desde Hugging Face si no lo tenías cacheado — necesita red esa primera vez, después queda en caché local y arranca offline.
 
-Si `uvicorn app.main:app --reload` falla con `ModuleNotFoundError: pkg_resources` (típicamente dentro de `Process SpawnProcess-1`, el subproceso del reloader): lo más probable es que el venv se haya creado con Python 3.13/3.14 en vez de 3.11/3.12 — `ctranslate2` (dependencia de `faster-whisper`) no tiene wheels para versiones de Python tan nuevas todavía, y falla en runtime en vez de al instalar. Recreá el venv apuntando explícitamente a Python 3.12 (ver 3.3 más arriba) en vez de instalar `setuptools` a mano — eso solo, sin la versión correcta de Python, no alcanza. Detalle en `docs/adr/0004-python-311-312-por-ctranslate2.md`.
+Si `uvicorn app.main:app` falla con `ModuleNotFoundError: pkg_resources` (con o sin `--reload`, y persiste incluso con Python 3.12): **no es un problema de versión de Python** (eso lo descartamos — ver `docs/adr/0004-python-311-312-por-ctranslate2.md`, actualizado). Es que el venv no tiene `setuptools` instalado (el módulo `venv` de Python ya no lo instala solo desde hace un tiempo) y `faster-whisper`/`ctranslate2` todavía necesita `pkg_resources` en tiempo de ejecución. Diagnóstico y fix completo en `docs/adr/0005-pkg-resources-pin-setuptools.md`; en resumen, con un venv **recién recreado desde cero** (no reusado):
+
+```powershell
+cd apps/orchestrator
+Remove-Item -Recurse -Force .venv
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+python -c "import sys; print(sys.executable)"   # confirmá que apunta DENTRO de .venv, no a otro Python
+pip install -e ".[dev]" -v
+python -c "import pkg_resources; print('setuptools ok')"   # smoke test ANTES de probar uvicorn
+uvicorn app.main:app
+```
+
+Si el smoke test (`import pkg_resources`) ya falla ahí, es un problema del Python/venv de esa máquina, no del código del repo — no tiene sentido seguir tocando dependencias del proyecto hasta que ese import aislado funcione.
 
 ```bash
 cd apps/orchestrator
