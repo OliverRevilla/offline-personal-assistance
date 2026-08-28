@@ -12,6 +12,10 @@ dependencies = [
     "numpy>=1.26",
     "faster-whisper>=1.0",
     "webrtcvad>=2.0.10",
+    # faster-whisper/ctranslate2 hacen `import pkg_resources` en tiempo de ejecución.
+    # `[build-system] requires` no alcanza para esto: ese setuptools solo vive en el
+    # entorno de build efímero de pip, no en el venv real donde corre la app.
+    "setuptools>=68",
 ]
 
 [project.optional-dependencies]

@@ -106,6 +106,8 @@ El paquete `webrtcvad` compila una extensión en C al instalarse — si `pip ins
 
 La primera vez que arranques el servidor después de este cambio, va a tardar más en levantar: descarga el modelo de whisper (`WHISPER_MODEL_SIZE=base` por default) desde Hugging Face si no lo tenías cacheado — necesita red esa primera vez, después queda en caché local y arranca offline.
 
+Si `uvicorn app.main:app --reload` falla con `ModuleNotFoundError: pkg_resources`: es un problema de Python 3.12+, no del código — los venv nuevos ya no traen `setuptools` por default, y `faster-whisper`/`ctranslate2` todavía lo necesitan en tiempo de ejecución. Con el venv activado: `pip install setuptools` (o `pip install -e ".[dev]"` de nuevo para que tome el `pyproject.toml` ya corregido).
+
 ```bash
 cd apps/orchestrator
 uvicorn app.main:app --reload
