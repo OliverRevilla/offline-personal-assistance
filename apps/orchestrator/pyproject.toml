@@ -2,7 +2,10 @@
 name = "orchestrator"
 version = "0.1.0"
 description = "Orchestrator FastAPI: WS gateway, streaming LLM (Ollama), STT/TTS, tool calling."
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"  # ctranslate2 (dependencia de faster-whisper) no publica wheels
+                                    # el mismo día que sale una versión nueva de CPython — con 3.13/3.14
+                                    # falla en runtime de formas confusas (ver ADR 0004). No subir el
+                                    # tope sin confirmar antes que ctranslate2 ya publicó wheels para esa versión.
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
