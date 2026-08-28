@@ -28,9 +28,9 @@ offline-personal-assistance/
 │   └── shared-contracts/         # schemas compartidos (mensajes WS, tool schemas) — fuente única para Python/TS
 │
 ├── docker/
-│   ├── docker-compose.yml        # Ollama + Qdrant + orchestrator (CPU-only por default)
-│   ├── docker-compose.gpu.yml    # override con NVIDIA Container Toolkit
-│   └── ollama/                   # Modelfiles / config de modelos
+│   ├── docker-compose.yml         # base: Qdrant + orchestrator (asume Ollama nativo en el host)
+│   ├── docker-compose.ollama.yml  # override: agrega Ollama containerizado (si no lo tenés nativo)
+│   └── docker-compose.gpu.yml     # override: GPU al Ollama containerizado (junto con el anterior)
 │
 ├── prompts/
 │   ├── system/                   # system prompt del asistente (versionado)

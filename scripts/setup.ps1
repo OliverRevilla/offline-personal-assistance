@@ -7,10 +7,8 @@
 # WSL2, vas a terminar con dos Ollama distintos escuchando en el mismo localhost:11434,
 # cada uno con sus propios modelos — exactamente el incidente que documenta el ADR 0006.
 #
-# Setup idempotente de Fase 0: descarga los modelos de Ollama y crea la colección de Qdrant.
-# Requiere que `docker compose up -d` (servicios ollama + qdrant) ya esté corriendo.
-
-$ComposeFile = Join-Path $PSScriptRoot "..\docker\docker-compose.yml"
+# Setup idempotente de Fase 0: descarga los modelos de Ollama (nativo) y crea la colección
+# de Qdrant. Requiere Ollama instalado en el host y `docker compose up -d qdrant` corriendo.
 
 $OllamaLlmModel = if ($env:OLLAMA_LLM_MODEL) { $env:OLLAMA_LLM_MODEL } else { "qwen2.5:7b-instruct-q4_K_M" }
 $OllamaEmbedModel = if ($env:OLLAMA_EMBED_MODEL) { $env:OLLAMA_EMBED_MODEL } else { "nomic-embed-text" }
@@ -19,10 +17,10 @@ $QdrantCollection = if ($env:QDRANT_COLLECTION) { $env:QDRANT_COLLECTION } else 
 $EmbeddingSize = if ($env:EMBEDDING_SIZE) { $env:EMBEDDING_SIZE } else { 768 }
 
 Write-Host "==> Descargando modelo LLM: $OllamaLlmModel"
-docker compose -f $ComposeFile exec -T ollama ollama pull $OllamaLlmModel
+ollama pull $OllamaLlmModel
 
 Write-Host "==> Descargando modelo de embeddings: $OllamaEmbedModel"
-docker compose -f $ComposeFile exec -T ollama ollama pull $OllamaEmbedModel
+ollama pull $OllamaEmbedModel
 
 Write-Host "==> Creando colección de Qdrant: $QdrantCollection (idempotente)"
 $body = "{`"vectors`": {`"size`": $EmbeddingSize, `"distance`": `"Cosine`"}}"
@@ -33,4 +31,4 @@ try {
     Write-Host "Aviso: Qdrant respondió con error (puede que la colección ya existiera con otra config). $_"
 }
 
-Write-Host "==> Setup completo. Probar con: docker compose -f $ComposeFile exec ollama ollama run $OllamaLlmModel"
+Write-Host "==> Setup completo. Probar con: ollama run $OllamaLlmModel"

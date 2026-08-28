@@ -4,7 +4,7 @@
 
 | Fase | Estado | Qué hace |
 |---|---|---|
-| 0 — Bootstrap & Infra | ✅ | `docker-compose` (Ollama + Qdrant + orchestrator), scripts de setup |
+| 0 — Bootstrap & Infra | ✅ | `docker-compose` (Qdrant + orchestrator; Ollama nativo por default, ver `docker/README.md`), scripts de setup |
 | 1 — Backend esqueleto + chat de texto | ✅ | FastAPI + WS, streaming de Ollama |
 | 2 — RAG sobre el vault | ✅ | Qdrant + `nomic-embed-text`, indexado manual, citación de notas |
 | 3 — Tool calling | ✅ | `buscar_nota`, `crear_nota`, `actualizar_nota` (con confirmación), `listar_tareas` |
@@ -20,7 +20,7 @@ Detalle completo de cada fase: `docs/ROADMAP.md` en el repo — incluye una secc
 
 - **Todo corre dentro de WSL2 con Ubuntu — sin excepciones ni mezclas.** No "un poco en PowerShell y un poco en WSL": Ollama, el venv de Python, `uvicorn`, y los comandos de `docker compose` corren *todos* desde la misma terminal de WSL2. Ver `docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md` — mezclar Windows nativo y WSL2 para piezas que necesitan hablarse entre sí (típicamente Ollama) hizo perder una sesión entera de debugging por tener **dos Ollamas distintos** escuchando en el mismo `localhost:11434`, cada uno desde su propio namespace de red, con modelos descargados de un solo lado.
 - Docker + Docker Compose v2 (`docker compose version`), con la integración de Docker Desktop con WSL2 activada (o el Docker Engine instalado directo dentro de la distro).
-- GPU: NVIDIA Container Toolkit configurado en WSL2 (no en Windows a secas). Confirmá con `nvidia-smi` corrido *desde dentro de WSL2* antes de asumir que el passthrough funciona.
+- GPU: con Ollama nativo (caso por defecto), alcanza con los drivers NVIDIA/CUDA de WSL2 — confirmá con `nvidia-smi` corrido *desde dentro de WSL2*. El NVIDIA Container Toolkit (`docker-compose.gpu.yml`) solo hace falta si usás el escenario alternativo de Ollama containerizado (ver `docker/README.md`).
 - **Python 3.11 o 3.12** para el venv de `apps/orchestrator` (prudencia de compatibilidad con `ctranslate2`; instalable en Ubuntu con `sudo apt install python3.12 python3.12-venv` si no viene por default). Si te aparece `ModuleNotFoundError: pkg_resources` al levantar el server, **no es un tema de versión de Python** — ver `docs/adr/0005-pkg-resources-pin-setuptools.md`.
 
 ## 3. Walkthrough completo: de cero hasta validar lo que está hecho
@@ -38,16 +38,24 @@ cp .env.example .env
 
 ### 3.2 Levantar la infraestructura (✔ Fase 0)
 
-Todo esto, desde una terminal de WSL2 (no PowerShell):
+Todo esto, desde una terminal de WSL2 (no PowerShell). Asume que **ya tenés Ollama instalado nativo** en tu distro (el caso por defecto de este repo — ver `docker/README.md` si en cambio no lo tenés y preferís todo containerizado, escenario B ahí):
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d ollama qdrant
-# con GPU (NVIDIA Container Toolkit configurado dentro de WSL2): agregar -f docker/docker-compose.gpu.yml
+docker compose -f docker/docker-compose.yml up -d qdrant
 
 ./scripts/setup.sh
-# descarga el modelo LLM + nomic-embed-text, e inicializa la colección de Qdrant
+# pullea el modelo LLM + nomic-embed-text con el `ollama` nativo, e inicializa la colección de Qdrant
 
-docker compose -f docker/docker-compose.yml exec ollama ollama run qwen2.5:7b-instruct-q4_K_M
+ollama run qwen2.5:7b-instruct-q4_K_M
+```
+
+Si en cambio NO tenés Ollama nativo y preferís containerizarlo también (escenario B de `docker/README.md`):
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.ollama.yml up -d ollama qdrant
+# con GPU: agregar también -f docker/docker-compose.gpu.yml
+
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.ollama.yml exec ollama ollama run qwen2.5:7b-instruct-q4_K_M
 ```
 
 (`scripts/setup.ps1` existe solo para el caso de correr *todo* — Ollama incluido — nativo en Windows sin WSL2 en absoluto. No lo mezcles con pasos corridos en WSL2.)
@@ -178,6 +186,7 @@ Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan 
 ## 4. Observaciones importantes mientras testeás
 
 - **Todo corre en WSL2 con Ubuntu, sin mezclar con Windows nativo** — esto costó una sesión entera de debugging (`docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`): tener Ollama instalado tanto nativo en Windows como dentro de WSL2 hace que `localhost:11434` resuelva a dos procesos completamente distintos según desde dónde lo llames, cada uno con sus propios modelos descargados. Un `Invoke-RestMethod` desde PowerShell puede funcionar perfecto mientras el orchestrator (corriendo en WSL2) recibe `model not found` para el mismo modelo — no es contradictorio, son dos servidores distintos. Si algo "funciona en una terminal pero no en otra", lo primero a sospechar es esto, no el código.
+- **Ollama nativo por default, no containerizado**: `docker-compose.yml` solo trae Qdrant + orchestrator; Ollama corre en el host (WSL2) porque ya lo tenías instalado ahí y containerizarlo no suma nada de performance (ni CPU ni GPU — los contenedores Linux son namespaces, no VMs). El override `docker-compose.ollama.yml` existe para quien no tenga Ollama nativo, ver `docker/README.md` — no combinar ambos.
 - **El reindexado RAG es manual y completo**, no incremental ni automático (no hay watcher de archivos). El tool calling sí opera sobre el archivo real al instante; es solo la búsqueda semántica automática la que queda desactualizada hasta el próximo `python -m app.rag.indexer`.
 - **`VAULT_PATH` apunta al vault de prueba del repo por default** (`../../vault` desde `apps/orchestrator`). Para tu vault real de Obsidian, cambiá `VAULT_PATH` en tu `.env` local a la ruta absoluta real — y no la commitees, `.env` ya está en `.gitignore`.
 - **Si corrés el orchestrator vía Docker**: el `docker-compose.yml` monta `../vault` como `/vault` **en lectura/escritura** (desde la Fase 3 el asistente necesita poder crear/editar notas ahí). Para tu vault real, un `docker-compose.override.yml` local (no versionado) sobreescribiendo ese volumen.

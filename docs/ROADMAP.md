@@ -5,9 +5,9 @@ Cada fase cierra con un commit/tag independiente y un criterio de "hecho" verifi
 ## Fase 0 — Bootstrap & Infra
 **Owner:** devops-engineer (revisa software-architect)
 - Estructura de carpetas del repo (ver `docs/REPO_STRUCTURE.md` / raíz del proyecto).
-- `docker-compose.yml` (Ollama + Qdrant) + `docker-compose.gpu.yml` (override NVIDIA Container Toolkit).
+- `docker-compose.yml` (Qdrant + orchestrator, asume Ollama nativo en el host — ver [ADR 0006](adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md)) + `docker-compose.ollama.yml` (override: Ollama containerizado, para quien no lo tenga nativo) + `docker-compose.gpu.yml` (override sobre el anterior: NVIDIA Container Toolkit).
 - Script de setup: pull de modelo Ollama (LLM + `nomic-embed-text`), init de colección Qdrant.
-- **Hecho cuando:** `docker compose up` levanta Ollama + Qdrant, y `ollama run <modelo>` responde usando GPU.
+- **Hecho cuando:** `docker compose up` levanta Qdrant, y `ollama run <modelo>` responde (nativo, o vía `docker-compose.ollama.yml` si corresponde) usando GPU si aplica.
 
 ## Fase 1 — Backend esqueleto + chat de texto
 **Owner:** backend-engineer + lead-ai-engineer

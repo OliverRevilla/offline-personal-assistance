@@ -1,13 +1,12 @@
+# Base: asume que Ollama YA corre nativo en el host (tu distro WSL2/Linux), no en Docker.
+# Es el caso más común y el recomendado por defecto — ver docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md:
+# containerizar Ollama no aporta nada de performance (los contenedores Linux son namespaces,
+# no VMs, y el passthrough de GPU vía NVIDIA Container Toolkit es directo al device) y solo
+# suma riesgo de terminar con dos Ollama distintos si ya tenés uno nativo funcionando.
+#
+# Si NO tenés Ollama instalado en el host y preferís que corra containerizado también, usar
+# el override docker-compose.ollama.yml (ver su comentario) en vez de editar este archivo.
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: opa-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    restart: unless-stopped
-
   qdrant:
     image: qdrant/qdrant:latest
     container_name: opa-qdrant
@@ -29,9 +28,16 @@ services:
       - ../.env
     environment:
       # Overrides de rutas para el filesystem DEL CONTENEDOR (las de .env asumen CWD local).
-      - VAULT_PATH=/vault
-      - SYSTEM_PROMPT_PATH=/app/prompts/system/assistant.md
-      - TOOLS_SCHEMA_DIR=/app/prompts/tools
+      VAULT_PATH: /vault
+      SYSTEM_PROMPT_PATH: /app/prompts/system/assistant.md
+      TOOLS_SCHEMA_DIR: /app/prompts/tools
+      # Ollama corre nativo en el host, no como servicio de este compose: "localhost" apuntaría
+      # al propio contenedor, así que hay que resolver el host vía el hostname especial de Docker.
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      # Necesario en Docker Engine nativo de Linux/WSL2 para que host.docker.internal resuelva
+      # (Docker Desktop ya lo provee solo; esta línea ahí es inofensiva/redundante).
+      - "host.docker.internal:host-gateway"
     volumes:
       # Bind mount de lectura/escritura al vault de prueba del repo: desde la Fase 3 el
       # orchestrator necesita poder crear/editar notas (tool calling), no solo leerlas.
@@ -41,10 +47,9 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - ollama
-      - qdrant
+      qdrant:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
-  ollama_models:
   qdrant_storage:

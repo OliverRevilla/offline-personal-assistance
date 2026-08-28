@@ -1,0 +1,28 @@
+# Override para el caso alternativo: NO tenés Ollama instalado en el host y preferís que
+# corra containerizado también. Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+#
+# No combinar con una instalación nativa de Ollama en el mismo host: vas a terminar con dos
+# Ollama distintos (uno nativo, uno en este contenedor) compitiendo por el mismo puerto o,
+# peor, cada uno con sus propios modelos descargados sin que nada te avise — ver el incidente
+# documentado en docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md antes de mezclar ambos.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: opa-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+
+  orchestrator:
+    environment:
+      # Acá sí es un servicio de compose: se resuelve por nombre, no por host.docker.internal.
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_started
+
+volumes:
+  ollama_models:
