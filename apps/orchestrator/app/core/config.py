@@ -24,5 +24,15 @@ class Settings(BaseSettings):
     orchestrator_port: int = 8000
     log_level: str = "info"
 
+    # --- STT (Fase 4) ---
+    whisper_model_size: str = "base"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"  # el más rápido en CPU; ver faster-whisper docs
+    whisper_language: str = "es"
+
+    # webrtcvad: 0 (menos agresivo filtrando no-voz) a 3 (más agresivo)
+    vad_aggressiveness: int = 2
+    vad_window_ms: int = 300  # ventana (ring buffer) usada para decidir inicio/fin de turno
+
 
 settings = Settings()

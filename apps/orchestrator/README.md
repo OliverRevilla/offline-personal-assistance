@@ -1,6 +1,6 @@
 # apps/orchestrator
 
-Backend FastAPI: gateway WebSocket, STT (faster-whisper + Silero VAD), TTS (Piper), cliente de Ollama (streaming + tool calling), y ejecución de tools contra el vault.
+Backend FastAPI: gateway WebSocket, STT (faster-whisper + webrtcvad), TTS (Piper), cliente de Ollama (streaming + tool calling), y ejecución de tools contra el vault.
 
 Owners: `backend-engineer`, `lead-ai-engineer` (llm/rag), `integration-engineer` (tools). Ver [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) para el contrato del protocolo WS.
 

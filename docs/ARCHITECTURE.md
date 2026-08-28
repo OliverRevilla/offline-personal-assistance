@@ -7,7 +7,7 @@
 | Frontend shell | **Tauri** + Next.js/React | Requerimiento explícito de "interfaz ligera"; Electron compite por RAM con Ollama/Qdrant en un presupuesto de 16GB |
 | Vector DB | **Qdrant** | Menor huella por vector, mejor filtrado por metadata, modo local + servidor |
 | TTS | **Piper-TTS** | Corre 100% en CPU con latencia predecible; libera la GPU para el LLM |
-| STT | faster-whisper + Silero VAD, **en CPU** | Misma razón: no competir por VRAM con el LLM |
+| STT | faster-whisper + webrtcvad, **en CPU** | Misma razón: no competir por VRAM con el LLM; webrtcvad en vez de Silero VAD para no agregar `torch` como dependencia — ver [ADR 0003](adr/0003-webrtcvad-en-vez-de-silero-vad.md) |
 | LLM | Ollama (Qwen2.5-7B / Llama3.1-8B, Q4/Q5) | Único servicio que usa GPU de forma intensiva |
 | Embeddings | `nomic-embed-text` vía Ollama | Reutiliza el mismo runtime que el LLM |
 
@@ -19,7 +19,7 @@
 sequenceDiagram
     participant Mic as Micrófono (Tauri/Next.js)
     participant WS as WebSocket Gateway (FastAPI)
-    participant VAD as Silero VAD
+    participant VAD as webrtcvad
     participant STT as faster-whisper (CPU)
     participant RAG as Qdrant + nomic-embed-text
     participant LLM as Ollama (Qwen2.5/Llama3.1, GPU)
@@ -32,7 +32,7 @@ sequenceDiagram
     VAD-->>WS: evento fin_de_turno
     WS->>STT: buffer de audio del turno
     STT-->>WS: transcripción final
-    WS-->>UI: JSON {tipo: transcript, texto}
+    WS-->>UI: JSON {tipo: transcript_final, texto}
 
     WS->>RAG: embed(query) + búsqueda top-k
     RAG-->>WS: chunks del vault + metadata
@@ -84,6 +84,17 @@ Pipeline de indexación (manual, `python -m app.rag.indexer`; full reindex, no i
 
 Pipeline de consulta (por turno de conversación, no persiste el contexto RAG en el historial — solo se inyecta para ese turno):
 `query del usuario → embed → búsqueda top-k en Qdrant → chunks inyectados en el prompt del LLM, citando la nota de origen`
+
+### 3.4 STT (audio ↔ texto)
+Cada conexión WS tiene su propio `VadSegmenter` (`app/stt/vad_segmenter.py`), con estado propio de "¿el usuario está hablando ahora?".
+
+1. El cliente manda frames binarios de audio: 1 byte de cabecera `0x01` + PCM16 mono a 16kHz (sin comprimir, sin encabezados WAV).
+2. `procesar_audio` (`app/api/ws.py`) le pasa el audio (sin la cabecera) al segmentador, frame a frame de 30ms, vía `webrtcvad`.
+3. Cuando el segmentador detecta que el turno de habla terminó (ventana de `VAD_WINDOW_MS` mayormente en silencio tras haber estado en voz), devuelve la utterance completa acumulada.
+4. Esa utterance se transcribe con faster-whisper (`app/stt/whisper_client.py`, CPU, `asyncio.to_thread` porque `transcribe()` es bloqueante) y el texto resultante se manda al cliente como `{"tipo": "transcript_final", "texto": ...}`.
+5. Ese mismo texto entra a `procesar_turno` — el mismo camino que sigue un `user_message` de texto (RAG + LLM + tool calling). Para el resto del pipeline, hablar o escribir es indistinguible.
+
+No hay reconexión/backpressure especial todavía si el cliente manda audio más rápido de lo que se puede transcribir (Fase 7).
 
 ## 4. Gestión de VRAM (responsabilidad cruzada software-architect / devops-engineer)
 - Ollama debe configurarse con un `keep_alive` explícito — no infinito por default — para poder liberar VRAM si el sistema detecta presión de memoria.

@@ -7,7 +7,7 @@ Asistente de voz personal, 100% offline, sobre hardware de consumo (GPU NVIDIA 8
 - [docs/REPO_STRUCTURE.md](docs/REPO_STRUCTURE.md) — estructura de carpetas y convenciones.
 
 ## Stack (decisiones cerradas, ver ADRs en `docs/adr/` para reabrir)
-LLM: Ollama (Qwen2.5-7B/Llama3.1-8B, Q4/Q5) · RAG: Qdrant + `nomic-embed-text` sobre un vault de Obsidian · STT: faster-whisper + Silero VAD (CPU) · TTS: Piper-TTS (CPU) · Backend: FastAPI (WS + tool calling) · Frontend: Tauri + Next.js/React · Infra: Docker + NVIDIA Container Toolkit.
+LLM: Ollama (Qwen2.5-7B/Llama3.1-8B, Q4/Q5) · RAG: Qdrant + `nomic-embed-text` sobre un vault de Obsidian · STT: faster-whisper + webrtcvad (CPU, ver ADR 0003) · TTS: Piper-TTS (CPU) · Backend: FastAPI (WS + tool calling) · Frontend: Tauri + Next.js/React · Infra: Docker + NVIDIA Container Toolkit.
 
 ## Subagentes de desarrollo (`.claude/agents/`)
 | Agente | Foco |

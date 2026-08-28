@@ -8,13 +8,13 @@
 | 1 — Backend esqueleto + chat de texto | ✅ | FastAPI + WS, streaming de Ollama |
 | 2 — RAG sobre el vault | ✅ | Qdrant + `nomic-embed-text`, indexado manual, citación de notas |
 | 3 — Tool calling | ✅ | `buscar_nota`, `crear_nota`, `actualizar_nota` (con confirmación), `listar_tareas` |
-| 4 — STT (oídos) | ⬜ | Falta |
+| 4 — STT (oídos) | 🔧 implementado, falta que lo pruebes con tu mic real | webrtcvad + faster-whisper (CPU), transcripción alimenta el mismo pipeline de texto |
 | 5 — TTS (boca) | ⬜ | Falta |
 | 6 — Frontend Tauri + Next.js | ⬜ | Falta |
 | 7 — Hardening / observabilidad | ⬜ | Falta |
 | 8 — Empaquetado y distribución | ⬜ | Falta |
 
-Detalle completo de cada fase: `docs/ROADMAP.md` en el repo (incluye una sección de "posibles incorporaciones futuras", como conectar tools de un MCP externo — anotada, no implementada). Arquitectura y protocolo WS: `docs/ARCHITECTURE.md`.
+Detalle completo de cada fase: `docs/ROADMAP.md` en el repo — incluye una sección de "posibles incorporaciones futuras" con las mejoras que fuimos dejando pasar a propósito en cada fase (reindexado incremental, confirmación asíncrona, transcripción parcial, CI, observabilidad, MCP externo, etc.), agrupadas por área. Ninguna está implementada; están anotadas para decidir con su propio ADR más adelante. Arquitectura y protocolo WS: `docs/ARCHITECTURE.md`.
 
 ## 2. Requisitos antes de empezar
 
@@ -22,7 +22,7 @@ Detalle completo de cada fase: `docs/ROADMAP.md` en el repo (incluye una secció
 - Si vas a usar GPU: NVIDIA Container Toolkit instalado y funcionando en el host (Linux/WSL2). En Windows puro sin WSL2, Ollama en Docker **no** va a ver la GPU — o corrés Ollama nativo en Windows (con su propio soporte CUDA) y apuntás `OLLAMA_HOST` a ese proceso, o usás WSL2.
 - Python 3.11+ para correr el orchestrator fuera de Docker (recomendado mientras se itera — más rápido que reconstruir la imagen en cada cambio).
 
-## 3. Walkthrough completo: de cero hasta validar las 4 fases hechas
+## 3. Walkthrough completo: de cero hasta validar lo que está hecho
 
 Todo esto asume una máquina limpia, sin nada corriendo todavía. Los checkpoints (`✔ Fase N`) son literalmente los criterios de "hecho" de `docs/ROADMAP.md` — si alguno falla, no tiene sentido seguir al siguiente paso.
 
@@ -100,7 +100,51 @@ Seguí en la misma sesión de `test_ws_chat.py`:
 
 **✔ Fase 3 si:** el paso 2 efectivamente te pidió confirmación antes de tocar el archivo (no lo hizo directo), y el audit log tiene las entradas esperadas.
 
-### 3.6 Correr los tests automatizados
+### 3.6 STT por micrófono (✔ Fase 4)
+
+El paquete `webrtcvad` compila una extensión en C al instalarse — si `pip install -e ".[dev]"` falla en Windows con un error de compilador (`Microsoft Visual C++ ... required`), probá con el fork que publica wheels precompiladas para Windows (`pip install webrtcvad-wheels` en vez de `webrtcvad`) antes de instalar Build Tools.
+
+La primera vez que arranques el servidor después de este cambio, va a tardar más en levantar: descarga el modelo de whisper (`WHISPER_MODEL_SIZE=base` por default) desde Hugging Face si no lo tenías cacheado — necesita red esa primera vez, después queda en caché local y arranca offline.
+
+```bash
+cd apps/orchestrator
+uvicorn app.main:app --reload
+```
+
+En otra terminal, desde la raíz del repo:
+
+```bash
+python scripts/test_stt_mic.py
+```
+
+Hablá una frase corta y hacé una pausa. El VAD necesita ~300ms de silencio para decidir que terminaste de hablar antes de mandar el audio a transcribir — no es instantáneo apenas dejás de hablar.
+
+Si no detecta que empezaste a hablar, o corta el audio en medio de la frase: revisá el micrófono que `sounddevice` está usando por default (`python -m sounddevice` lista los dispositivos) y probá subir/bajar `VAD_AGGRESSIVENESS` (0-3) en tu `.env`.
+
+**Checklist de cumplimiento de la Fase 4:**
+
+Prerrequisitos
+- [ ] El servidor arrancó sin errores (la primera vez tarda más: está descargando/cargando el modelo de whisper).
+- [ ] `GET http://localhost:8000/health` responde `{"status": "ok"}`.
+
+Funcional (criterio de "hecho" del roadmap)
+- [ ] `scripts/test_stt_mic.py` conecta sin errores y queda escuchando.
+- [ ] Hablando, **no** aparece nada hasta que hacés una pausa de ~300ms — si transcribe a mitad de frase, el VAD está cortando muy agresivo.
+- [ ] Al pausar, aparece `[transcripción] ...` con texto razonablemente fiel a lo que dijiste.
+- [ ] Después de la transcripción, el turno sigue solo (`[pensando...]`, tokens de respuesta, tool_call si corresponde) sin que hayas escrito nada a mano.
+- [ ] Una pregunta que dependa de una nota del vault (ej. "¿cuál es el nombre en clave del proyecto?") responde citándola igual que por texto — confirma que Fase 2 sigue funcionando disparada por voz.
+- [ ] Un pedido de crear/actualizar una nota dispara la tool correspondiente igual que por texto, incluida la confirmación si es `actualizar_nota` — confirma que Fase 3 sigue funcionando disparada por voz.
+
+Robustez razonable para esta fase
+- [ ] Silencio prolongado sin hablar no genera transcripciones falsas ni tira errores en el server.
+- [ ] Frases cortas (una o dos palabras) se transcriben sin romper el flujo.
+- [ ] Cortar la conexión (Ctrl+C en el cliente) a mitad de una frase no deja una excepción sin manejar en los logs del backend.
+
+Fuera de alcance de esta fase (no busques esto todavía)
+- [ ] No hay transcripción parcial en tiempo real, solo `transcript_final` al terminar el turno — está anotado como mejora futura en `docs/ROADMAP.md`, no es un bug.
+- [ ] No hay voz de respuesta (Fase 5) ni interfaz gráfica (Fase 6) todavía.
+
+### 3.7 Correr los tests automatizados
 
 ```bash
 cd apps/orchestrator
@@ -117,6 +161,9 @@ Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan 
 - **Sandboxing de las tools**: `crear_nota`/`actualizar_nota` no pueden escribir fuera del vault (path traversal bloqueado) ni dentro de `vault/.asistente/` (reservado para el audit log y los backups). Un error de "ruta fuera del vault" o "ruta reservada" es este chequeo funcionando, no un bug.
 - **La confirmación de `actualizar_nota` es síncrona**: mientras el servidor espera tu `s`/`n`, ese turno de WS queda bloqueado. Documentado en `docs/adr/0002-confirmacion-sincrona-para-tools-destructivas.md` — limitación conocida, no algo para "arreglar" sin pensar el trade-off primero.
 - **Presupuesto de VRAM (8GB)**: solo el LLM usa GPU sostenida; STT/TTS (fases 4-5) y los embeddings corren en CPU. No muevas nada a GPU sin pasar por un ADR.
+- **VAD es webrtcvad, no Silero** (que era lo pedido originalmente): se cambió a propósito para no meter `torch` como dependencia — te pregunté antes de decidirlo, ver `docs/adr/0003-webrtcvad-en-vez-de-silero-vad.md`. Si en la práctica el reconocimiento de "cuándo empezaste/terminaste de hablar" anda mal (mucho ruido de fondo, etc.), ese ADR es el lugar para reabrir la decisión con evidencia real, no antes.
+- **El modelo de whisper se descarga la primera vez que arranca el servidor** (necesita red esa vez; después queda cacheado y corre offline) — mismo patrón que `ollama pull` para el LLM, no es una excepción al diseño offline, es el costo de setup inicial.
+- **Transcribir es una llamada bloqueante** (`asyncio.to_thread`): mientras faster-whisper procesa una utterance, ese turno particular no avanza más rápido por tener más CPU libre — es CPU-bound, un modelo `base` en CPU tarda razonablemente poco para frases cortas pero no es instantáneo.
 - **`OLLAMA_KEEP_ALIVE`** (default `5m`): si cada mensaje después de una pausa tarda por recarga del modelo, subilo; si la VRAM anda justa, bajalo.
 - **`packages/rag-engine/` sigue vacío a propósito** — la lógica vive en `apps/orchestrator/app/rag/` hasta que exista un segundo consumidor real.
 - **Convención de nombres**: el código evita prefijos con guion bajo (`_nombre`) para "privado" — si ves uno en algo nuevo que se agregue, no es intencional, avisá para corregirlo.
@@ -124,7 +171,7 @@ Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan 
 
 ## 5. Pendiente para "finalizar" (no hacer todavía sin criterio)
 
-- No hay tests de integración end-to-end reales todavía (trabajo explícito de la Fase 7, agente `integration-engineer`). Lo que hay son tests unitarios sueltos (`test_health.py`, `test_chunking.py`, `test_vault_tools.py`, `test_tool_registry.py`).
-- No hay CI configurado — correr `pytest` manualmente en `apps/orchestrator` antes de dar por buena una fase.
+- No hay tests de integración end-to-end reales todavía (trabajo explícito de la Fase 7, agente `integration-engineer`). Lo que hay son tests unitarios sueltos (`test_health.py`, `test_chunking.py`, `test_vault_tools.py`, `test_tool_registry.py`, `test_vad_segmenter.py`).
+- El resto de las mejoras conocidas y deliberadamente pospuestas (reindexado incremental, confirmación asíncrona, CI, observabilidad, etc.) están en la sección "Posibles incorporaciones futuras" de `docs/ROADMAP.md` — revisar ahí antes de decidir qué atacar después de la Fase 8, no reinventar la lista acá.
 - Nada de esto está pensado para multi-usuario ni exposición fuera de tu máquina — si aparece la tentación de "exponerlo en la red" o "agregar login", eso es scope creep respecto al roadmap actual.
 - Los agentes de desarrollo (`.claude/agents/` en el repo) tienen la responsabilidad de cada área — si estás retomando esto después de un tiempo, es más rápido pedirle a `software-architect` que audite el estado contra `docs/ARCHITECTURE.md` que releer todo el código de cero.

@@ -7,7 +7,7 @@ offline-personal-assistance/
 │   │   ├── app/
 │   │   │   ├── api/            # rutas HTTP/WS
 │   │   │   ├── core/           # config, logging, framing de mensajes
-│   │   │   ├── stt/            # faster-whisper + Silero VAD
+│   │   │   ├── stt/            # faster-whisper + webrtcvad (ver ADR 0003)
 │   │   │   ├── tts/            # Piper-TTS + sentence buffering
 │   │   │   ├── llm/            # cliente Ollama, streaming, tool-calling loop
 │   │   │   ├── tools/          # registry + ejecución real de tools contra el vault (sandboxed)

@@ -18,7 +18,7 @@ No escribes features de negocio directamente salvo que se te pida explícitament
 ## Contexto fijo del proyecto (no lo repreguntes, ya está decidido)
 - LLM: Ollama con Qwen2.5-7B o Llama3.1-8B, cuantizado Q4/Q5.
 - RAG: Qdrant + embeddings `nomic-embed-text`, fuente de verdad = vault de Obsidian (.md en disco).
-- STT: faster-whisper + Silero VAD, en CPU (para no competir con el LLM por VRAM).
+- STT: faster-whisper + webrtcvad, en CPU (para no competir con el LLM por VRAM; ver ADR 0003 sobre por qué webrtcvad y no Silero VAD).
 - TTS: Piper-TTS, en CPU.
 - Backend: FastAPI, WebSockets + tool calling nativo de Ollama.
 - Frontend: Tauri + Next.js/React (webview del sistema, no Electron).
