@@ -38,7 +38,14 @@ async def stream_chat(messages: list[dict], tools: list[dict] | None = None) -> 
 
     async with httpx.AsyncClient(base_url=settings.ollama_host, timeout=None) as client:
         async with client.stream("POST", "/api/chat", json=payload) as response:
-            response.raise_for_status()
+            if response.is_error:
+                # httpx.HTTPStatusError no incluye el cuerpo de la respuesta en su mensaje,
+                # y ahí es donde Ollama explica qué falló de verdad (ej. "model does not
+                # support tools") — sin esto quedamos ciegos a la razón real del error.
+                body = (await response.aread()).decode(errors="replace")
+                raise RuntimeError(
+                    f"Ollama respondió {response.status_code} en POST {settings.ollama_host}/api/chat: {body}"
+                )
             async for line in response.aiter_lines():
                 if not line:
                     continue

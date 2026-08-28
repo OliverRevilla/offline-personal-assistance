@@ -64,6 +64,8 @@ cp ../../.env.example .env
 uvicorn app.main:app --reload
 ```
 
+Si abrís `http://127.0.0.1:8000/` en el navegador para chequear que levantó, vas a ver `404 Not Found` para `GET /` y `GET /favicon.ico` en los logs — es esperado, no un bug: la app no tiene página raíz ni favicon, solo expone `GET /health` y el WebSocket `/ws/chat`. Para confirmar que está sano, entrá a `http://127.0.0.1:8000/health` (debería responder `{"status":"ok"}`).
+
 En otra terminal, desde la raíz del repo:
 
 ```bash

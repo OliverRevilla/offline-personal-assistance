@@ -1,5 +1,7 @@
 # 0005 — `pkg_resources` faltante: no es un problema de versión de Python
 
+> **Resuelto y confirmado:** con un venv recreado desde cero (Python 3.12) y el pin `setuptools>=68,<76` de este ADR, tanto el smoke test (`import pkg_resources`) como `uvicorn app.main:app` levantan correctamente. La causa raíz era el venv previo (mezclado con restos de instalaciones anteriores), no el código del repo ni la versión de Python.
+
 ## Contexto
 El ADR 0004 asumía que el `ModuleNotFoundError: pkg_resources` al levantar el orchestrator era por `ctranslate2` (dependencia de `faster-whisper`) sin wheels para una versión de Python demasiado nueva (3.14). Esa hipótesis quedó **refutada**: downgradeando a Python 3.12, el mismo error persiste, tanto con `uvicorn --reload` como sin él (lo cual también descarta que fuera un problema específico del subproceso que crea el reload en Windows).
 
