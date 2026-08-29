@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +35,19 @@ class Settings(BaseSettings):
     # webrtcvad: 0 (menos agresivo filtrando no-voz) a 3 (más agresivo)
     vad_aggressiveness: int = 2
     vad_window_ms: int = 300  # ventana (ring buffer) usada para decidir inicio/fin de turno
+
+    # --- TTS (Fase 5) — Piper como subproceso CLI, ver ADR 0007 ---
+    piper_binary: str = "piper"  # nombre en PATH, o ruta absoluta/relativa al ejecutable
+    piper_models_dir: str = "../../models/piper"
+    piper_voice: str = "es_ES-davefx-medium"  # requiere <voz>.onnx + <voz>.onnx.json en piper_models_dir
+
+    @property
+    def piper_model_path(self) -> Path:
+        return Path(self.piper_models_dir) / f"{self.piper_voice}.onnx"
+
+    @property
+    def piper_config_path(self) -> Path:
+        return Path(self.piper_models_dir) / f"{self.piper_voice}.onnx.json"
 
 
 settings = Settings()

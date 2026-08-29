@@ -49,6 +49,7 @@ offline-personal-assistance/
 │   └── agents/                   # subagentes de desarrollo (este documento los referencia)
 │
 ├── vault/                        # vault de Obsidian local para desarrollo (gitignored salvo un note de prueba)
+├── models/                       # binarios/voces descargados a mano (Piper), gitignored salvo README
 ├── .env.example
 ├── CLAUDE.md
 └── README.md

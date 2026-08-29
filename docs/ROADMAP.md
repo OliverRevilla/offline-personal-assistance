@@ -71,7 +71,7 @@ Ideas anotadas para evaluar más adelante, deliberadamente fuera del roadmap act
 
 ### Voz
 - **Transcripción parcial en streaming** (hoy solo se manda `transcript_final` una vez que el VAD decide que el turno de habla terminó) — mejoraría la UX percibida cuando exista frontend (Fase 6), no hace falta para validar el pipeline con un script de prueba.
-- **Reconsiderar Silero VAD** si en la práctica `webrtcvad` no alcanza (mucho ruido de fondo, susurros) — ver [ADR 0003](adr/0003-webrtcvad-en-vez-de-silero-vad.md). No cambiarlo sin evidencia real de un problema.
+- **Mejorar la precisión de escucha (VAD + STT)**: probado en Fase 4, el pipeline funciona ("medianamente correcto" según feedback real de uso) pero hay margen de mejora en qué tan bien detecta inicio/fin de turno y en la fidelidad de la transcripción. Candidatos a probar, en orden de costo creciente: ajustar `VAD_AGGRESSIVENESS`/`VAD_WINDOW_MS`, subir `WHISPER_MODEL_SIZE` de `base` a `small`/`medium` (más preciso, más lento en CPU), y recién como último recurso reconsiderar Silero VAD en vez de `webrtcvad` (ver [ADR 0003](adr/0003-webrtcvad-en-vez-de-silero-vad.md) — ahora sí con evidencia real de que `webrtcvad` se queda corto, no solo hipotética). Programado para revisarse después de la Fase 7, no bloquea las fases siguientes.
 
 ### Infra y calidad
 - **CI** (lint + tests automáticos en cada push): hoy `pytest` se corre a mano. Ya asignado a la Fase 7/`devops-engineer`, todavía no implementado.

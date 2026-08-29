@@ -238,3 +238,7 @@ docker/**/data/
 qdrant_storage/
 ollama_models/
 
+# Modelos/voces descargados a mano (Piper, etc.) — solo se trackea el README con instrucciones.
+models/*
+!models/README.md
+

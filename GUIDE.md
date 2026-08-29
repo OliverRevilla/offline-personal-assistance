@@ -8,9 +8,9 @@
 | 1 — Backend esqueleto + chat de texto | ✅ | FastAPI + WS, streaming de Ollama |
 | 2 — RAG sobre el vault | ✅ | Qdrant + `nomic-embed-text`, indexado manual, citación de notas |
 | 3 — Tool calling | ✅ | `buscar_nota`, `crear_nota`, `actualizar_nota` (con confirmación), `listar_tareas` |
-| 4 — STT (oídos) | 🔧 implementado, falta que lo pruebes con tu mic real | webrtcvad + faster-whisper (CPU), transcripción alimenta el mismo pipeline de texto |
-| 5 — TTS (boca) | ⬜ | Falta |
-| 6 — Frontend Tauri + Next.js | ⬜ | Falta |
+| 4 — STT (oídos) | ✅ (probado, "medianamente correcto" — precisión anotada como mejora futura) | webrtcvad + faster-whisper (CPU), transcripción alimenta el mismo pipeline de texto |
+| 5 — TTS (boca) | 🔧 implementado, falta que lo pruebes | Piper-TTS (subproceso CLI), sentence-buffering, audio incremental por WS |
+| 6 — Frontend Tauri + Next.js | 🔧 implementado, falta que lo pruebes | Tauri nativo en Windows + Next.js estático, WS + AudioWorklet |
 | 7 — Hardening / observabilidad | ⬜ | Falta |
 | 8 — Empaquetado y distribución | ⬜ | Falta |
 
@@ -22,6 +22,7 @@ Detalle completo de cada fase: `docs/ROADMAP.md` en el repo — incluye una secc
 - Docker + Docker Compose v2 (`docker compose version`), con la integración de Docker Desktop con WSL2 activada (o el Docker Engine instalado directo dentro de la distro).
 - GPU: con Ollama nativo (caso por defecto), alcanza con los drivers NVIDIA/CUDA de WSL2 — confirmá con `nvidia-smi` corrido *desde dentro de WSL2*. El NVIDIA Container Toolkit (`docker-compose.gpu.yml`) solo hace falta si usás el escenario alternativo de Ollama containerizado (ver `docker/README.md`).
 - **Python 3.11 o 3.12** para el venv de `apps/orchestrator` (prudencia de compatibilidad con `ctranslate2`; instalable en Ubuntu con `sudo apt install python3.12 python3.12-venv` si no viene por default). Si te aparece `ModuleNotFoundError: pkg_resources` al levantar el server, **no es un tema de versión de Python** — ver `docs/adr/0005-pkg-resources-pin-setuptools.md`.
+- **Node.js LTS + Rust/Cargo, instalados en Windows nativo** (no en WSL2) para `apps/desktop` — a diferencia de todo lo demás, el frontend Tauri corre nativo en Windows a propósito (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend en WSL2 no se toca.
 
 ## 3. Walkthrough completo: de cero hasta validar lo que está hecho
 
@@ -172,9 +173,80 @@ Robustez razonable para esta fase
 
 Fuera de alcance de esta fase (no busques esto todavía)
 - [ ] No hay transcripción parcial en tiempo real, solo `transcript_final` al terminar el turno — está anotado como mejora futura en `docs/ROADMAP.md`, no es un bug.
-- [ ] No hay voz de respuesta (Fase 5) ni interfaz gráfica (Fase 6) todavía.
+- [ ] No hay interfaz gráfica (Fase 6) todavía.
 
-### 3.7 Correr los tests automatizados
+### 3.7 TTS: la boca del asistente (✔ Fase 5)
+
+Antes de nada, necesitás el binario `piper` y una voz descargados — no vienen con el repo (son binarios/modelos grandes). Ver [models/README.md](models/README.md) para los links y dónde dejarlos (`models/piper/`).
+
+Con eso listo, arrancá el servidor de nuevo (si el binario/la voz no están, va a fallar acá mismo con un error explícito, no recién cuando le hables):
+
+```bash
+cd apps/orchestrator
+uvicorn app.main:app --reload
+```
+
+Y probá con cualquiera de los dos clientes (ambos reproducen audio ahora):
+
+```bash
+python scripts/test_ws_chat.py     # escribiendo
+# o
+python scripts/test_stt_mic.py     # hablando (Fases 4+5 combinadas)
+```
+
+Mandá un mensaje que genere una respuesta de varias oraciones (ej. "contame en detalle qué es este proyecto"). Deberías **escuchar** la respuesta, con el audio de la primera oración empezando a sonar mientras el LLM todavía está generando el resto del texto — no un silencio hasta que termine todo y recién ahí arranque el audio.
+
+**Checklist de cumplimiento de la Fase 5:**
+
+Prerrequisitos
+- [ ] El servidor arrancó sin errores de Piper (si el binario o la voz no están, el error lo dice explícitamente al levantar, no al hablar).
+
+Funcional (criterio de "hecho" del roadmap)
+- [ ] Se escucha audio de la respuesta, no solo texto.
+- [ ] Con una respuesta de varias oraciones, el audio de la primera empieza a sonar notablemente antes de que el texto completo termine de imprimirse en la terminal — esa es la prueba real de que el sentence-buffering funciona y no se está esperando al mensaje completo.
+- [ ] La voz suena razonablemente inteligible (no tiene que ser perfecta, pero tiene que entenderse).
+
+Robustez razonable para esta fase
+- [ ] Un mensaje muy corto (una sola oración, o sin punto final) igual produce audio.
+- [ ] Un turno con tool calling de por medio (ej. pedir que liste tareas) sigue generando audio de la respuesta final, no se rompe por los `tool_call`/`tool_result` intermedios.
+- [ ] Si detenés el cliente a mitad de la síntesis (Ctrl+C), el servidor no queda con un proceso de Piper colgado ni una excepción sin manejar en los logs.
+
+Fuera de alcance de esta fase (no busques esto todavía)
+- [ ] No hay interrupción de la voz por parte del usuario ("barge-in") — si el asistente está hablando y el usuario escribe/habla de nuevo, no hay lógica especial de corte todavía.
+- [ ] El empaquetado en Docker de Piper (binario + voz dentro de la imagen) queda para la Fase 8 — ver [docs/adr/0007](docs/adr/0007-piper-como-subproceso-cli.md).
+
+### 3.8 Frontend: la app de escritorio (✔ Fase 6)
+
+**Esto corre en Windows nativo, no en WSL2** (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend (`apps/orchestrator`) tiene que seguir corriendo en WSL2 mientras probás esto.
+
+Requisitos en Windows (una sola vez): Node.js LTS, y Rust vía [rustup.rs](https://rustup.rs). No hace falta instalar la Tauri CLI global, es una dependencia de npm.
+
+```powershell
+cd apps\desktop
+npm install
+copy .env.local.example .env.local
+npm run tauri dev
+```
+
+La primera vez, `cargo` va a compilar bastante (es la primera build de Tauri) — puede tardar varios minutos. Se abre una ventana nativa con la UI.
+
+**✔ Fase 6 si:** con el backend corriendo en WSL2, la ventana conecta ("Conectado" en la barra de estado), podés escribir un mensaje y ver la respuesta en pantalla + escucharla, y activando el micrófono (🎙️) podés hablarle y que responda por voz — el mismo flujo end-to-end de las fases 1-5, ahora con UI real en vez de scripts de consola.
+
+**Checklist de cumplimiento de la Fase 6:**
+
+- [ ] `npm install` no falla (si falla compilando algo de Rust, revisá que `cargo`/Visual Studio Build Tools estén bien instalados — Tauri en Windows los necesita).
+- [ ] `npm run tauri dev` abre una ventana y la barra de estado dice "Conectado".
+- [ ] Escribir un mensaje de texto y recibir la respuesta en pantalla, token por token.
+- [ ] Se escucha la respuesta en el parlante (no solo texto).
+- [ ] Activar el micrófono, hablar, y ver la transcripción aparecer como mensaje de usuario, seguida de la respuesta normal.
+- [ ] Pedir crear/actualizar una nota dispara la tool y, si es `actualizar_nota`, aparece la barra de confirmación (Aprobar/Rechazar) en la UI — no en una consola.
+- [ ] Cerrar la ventana no deja el backend en un estado raro (probá mandar otro mensaje desde `scripts/test_ws_chat.py` después de cerrar la app: debería seguir funcionando).
+
+Fuera de alcance de esta fase (no busques esto todavía)
+- [ ] Sin instalador/empaquetado (`tauri build`) — eso es la Fase 8, y ni siquiera existen los íconos todavía (`src-tauri/icons/README.md`).
+- [ ] Sin indicador visual de "escuchando activamente vs. en silencio" durante la captura de mic — el botón solo indica on/off, no el estado del VAD en tiempo real.
+
+### 3.9 Correr los tests automatizados
 
 ```bash
 cd apps/orchestrator
@@ -185,8 +257,13 @@ Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan 
 
 ## 4. Observaciones importantes mientras testeás
 
+- **El frontend (Fase 6) es la única pieza que corre nativo en Windows, a propósito** — el backend sigue 100% en WSL2. No es una contradicción del ADR 0006 (ese ADR habla de no duplicar el *mismo servicio* entre los dos lados, típicamente Ollama); acá son dos procesos distintos hablándose por WebSocket. Ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`.
+- **El código de `apps/desktop` está escrito pero no compilado/corrido todavía en ningún lado** — a diferencia del backend (que se fue probando en cada fase), esto es la primera vez que se toca TypeScript/Rust en el proyecto. Es razonable esperar que `npm install`/`npm run tauri dev` tire algún error de versión de paquete o de configuración de Tauri la primera vez — no asumas que "está mal escrito" antes de ver el error real, pero tampoco asumas que va a andar a la primera después de todo lo que pasó con las dependencias de Python esta sesión.
+- **Sin `packages/shared-contracts/` todavía**: el contrato del protocolo WS está duplicado a mano en `apps/desktop/src/lib/protocol.ts` (TypeScript) y `apps/orchestrator/app/api/ws.py` (comentario Python). Si cambiás el protocolo de un lado, acordate de actualizar el otro.
 - **Todo corre en WSL2 con Ubuntu, sin mezclar con Windows nativo** — esto costó una sesión entera de debugging (`docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`): tener Ollama instalado tanto nativo en Windows como dentro de WSL2 hace que `localhost:11434` resuelva a dos procesos completamente distintos según desde dónde lo llames, cada uno con sus propios modelos descargados. Un `Invoke-RestMethod` desde PowerShell puede funcionar perfecto mientras el orchestrator (corriendo en WSL2) recibe `model not found` para el mismo modelo — no es contradictorio, son dos servidores distintos. Si algo "funciona en una terminal pero no en otra", lo primero a sospechar es esto, no el código.
 - **Ollama nativo por default, no containerizado**: `docker-compose.yml` solo trae Qdrant + orchestrator; Ollama corre en el host (WSL2) porque ya lo tenías instalado ahí y containerizarlo no suma nada de performance (ni CPU ni GPU — los contenedores Linux son namespaces, no VMs). El override `docker-compose.ollama.yml` existe para quien no tenga Ollama nativo, ver `docker/README.md` — no combinar ambos.
+- **Piper corre como subproceso CLI, no como paquete pip** (ver `docs/adr/0007-piper-como-subproceso-cli.md`) — a propósito, para no meter otra extensión compilada frágil entre versiones de Python al proyecto (ya nos pasó dos veces con `ctranslate2` y, en menor medida, `webrtcvad`). Esto implica un proceso de Piper nuevo por cada oración sintetizada, no un modelo cargado en memoria una sola vez — para frases cortas el overhead es aceptable, si en la práctica se nota lento vale la pena revisar ese ADR.
+- **El binario y la voz de Piper no vienen con el repo** (son binarios grandes) — hay que descargarlos a mano en `models/piper/` antes de la Fase 5, ver `models/README.md`. Si faltan, el servidor falla al arrancar con un error explícito.
 - **El reindexado RAG es manual y completo**, no incremental ni automático (no hay watcher de archivos). El tool calling sí opera sobre el archivo real al instante; es solo la búsqueda semántica automática la que queda desactualizada hasta el próximo `python -m app.rag.indexer`.
 - **`VAULT_PATH` apunta al vault de prueba del repo por default** (`../../vault` desde `apps/orchestrator`). Para tu vault real de Obsidian, cambiá `VAULT_PATH` en tu `.env` local a la ruta absoluta real — y no la commitees, `.env` ya está en `.gitignore`.
 - **Si corrés el orchestrator vía Docker**: el `docker-compose.yml` monta `../vault` como `/vault` **en lectura/escritura** (desde la Fase 3 el asistente necesita poder crear/editar notas ahí). Para tu vault real, un `docker-compose.override.yml` local (no versionado) sobreescribiendo ese volumen.
@@ -203,7 +280,7 @@ Son tests unitarios (chunking, sandboxing de tools, registry) — no reemplazan 
 
 ## 5. Pendiente para "finalizar" (no hacer todavía sin criterio)
 
-- No hay tests de integración end-to-end reales todavía (trabajo explícito de la Fase 7, agente `integration-engineer`). Lo que hay son tests unitarios sueltos (`test_health.py`, `test_chunking.py`, `test_vault_tools.py`, `test_tool_registry.py`, `test_vad_segmenter.py`).
+- No hay tests de integración end-to-end reales todavía (trabajo explícito de la Fase 7, agente `integration-engineer`). Lo que hay son tests unitarios sueltos (`test_health.py`, `test_chunking.py`, `test_vault_tools.py`, `test_tool_registry.py`, `test_vad_segmenter.py`, `test_sentence_buffer.py`).
 - El resto de las mejoras conocidas y deliberadamente pospuestas (reindexado incremental, confirmación asíncrona, CI, observabilidad, etc.) están en la sección "Posibles incorporaciones futuras" de `docs/ROADMAP.md` — revisar ahí antes de decidir qué atacar después de la Fase 8, no reinventar la lista acá.
 - Nada de esto está pensado para multi-usuario ni exposición fuera de tu máquina — si aparece la tentación de "exponerlo en la red" o "agregar login", eso es scope creep respecto al roadmap actual.
 - Los agentes de desarrollo (`.claude/agents/` en el repo) tienen la responsabilidad de cada área — si estás retomando esto después de un tiempo, es más rápido pedirle a `software-architect` que audite el estado contra `docs/ARCHITECTURE.md` que releer todo el código de cero.

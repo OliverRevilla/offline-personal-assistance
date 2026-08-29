@@ -63,8 +63,8 @@ sequenceDiagram
 
 ### 3.1 WebSocket (frontend ↔ orchestrator)
 Una sola conexión WS por sesión, multiplexando dos tipos de frame:
-- **Frames de control (texto/JSON)**: `{"tipo": "transcript_partial"|"transcript_final"|"user_message"|"token"|"turn_start"|"turn_end"|"tool_call"|"tool_result"|"confirmacion_requerida"|"confirmacion_respuesta"|"error", ...}`
-- **Frames binarios**: audio entrante (mic → backend) y audio saliente (Piper → frontend), diferenciados por un byte de cabecera (`0x01` = audio_in, `0x02` = audio_out).
+- **Frames de control (texto/JSON)**: `{"tipo": "audio_meta"|"transcript_partial"|"transcript_final"|"user_message"|"token"|"turn_start"|"turn_end"|"tool_call"|"tool_result"|"confirmacion_requerida"|"confirmacion_respuesta"|"error", ...}`. `audio_meta` (`{"sample_rate": int}`) se manda una sola vez, justo después de aceptar la conexión, para que el cliente sepa cómo interpretar los frames binarios de audio saliente.
+- **Frames binarios**: audio entrante (mic → backend) y audio saliente (Piper → frontend), diferenciados por un byte de cabecera (`0x01` = audio_in, `0x02` = audio_out). Ambos son PCM16 mono crudo (sin encabezado WAV); el de entrada siempre a 16kHz, el de salida a la sample rate anunciada en `audio_meta`.
 
 Este framing es un **contrato compartido** entre `frontend-engineer` y `backend-engineer`: cualquier cambio se refleja en este documento en el mismo commit que el código.
 
@@ -95,6 +95,15 @@ Cada conexión WS tiene su propio `VadSegmenter` (`app/stt/vad_segmenter.py`), c
 5. Ese mismo texto entra a `procesar_turno` — el mismo camino que sigue un `user_message` de texto (RAG + LLM + tool calling). Para el resto del pipeline, hablar o escribir es indistinguible.
 
 No hay reconexión/backpressure especial todavía si el cliente manda audio más rápido de lo que se puede transcribir (Fase 7).
+
+### 3.5 TTS (texto ↔ audio)
+Piper corre como subproceso CLI, no como librería Python cargada en memoria (ver [ADR 0007](adr/0007-piper-como-subproceso-cli.md) — evita depender de otra extensión compilada frágil entre versiones de Python, después de los dolores de cabeza de `ctranslate2`/`webrtcvad`).
+
+1. `procesar_turno` (`app/api/ws.py`) alimenta cada token que llega del LLM a un `SentenceBuffer` (`app/tts/sentence_buffer.py`), que corta por puntuación de fin de oración.
+2. Cada oración completa se encola (`asyncio.Queue`) para un task en paralelo (`hablar_oraciones`) que la sintetiza con `app.tts.piper_client.synthesize` (un proceso de Piper por oración) y manda el audio resultante como frame binario `0x02` + PCM16.
+3. El streaming de **texto** (`token`) y el de **audio** son independientes: la síntesis de una oración no bloquea que sigan llegando tokens de texto de la oración siguiente — así el audio puede empezar a sonar antes de que el LLM termine de generar el mensaje completo.
+4. Al cerrar el turno (incluso si hubo un error), se manda un sentinel `None` a la cola y se espera a que el worker termine de mandar todo el audio pendiente antes de emitir `turn_end` — así el cliente sabe que no va a llegar más audio de ese turno.
+5. Un fallo de síntesis (Piper no disponible, oración rara, etc.) se loguea y se descarta esa oración puntual — no tumba el resto del turno (mismo criterio de resiliencia que RAG).
 
 ## 4. Gestión de VRAM (responsabilidad cruzada software-architect / devops-engineer)
 - Ollama debe configurarse con un `keep_alive` explícito — no infinito por default — para poder liberar VRAM si el sistema detecta presión de memoria.

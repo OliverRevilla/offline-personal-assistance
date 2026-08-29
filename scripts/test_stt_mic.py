@@ -1,25 +1,54 @@
-"""Cliente manual de prueba para STT vía micrófono (Fase 4 del roadmap).
+"""Cliente manual de prueba para STT + TTS vía micrófono (Fases 4-5 del roadmap).
 
 Uso:
     python scripts/test_stt_mic.py [ws://localhost:8000/ws/chat]
 
-Requiere `sounddevice` y `websockets` (extra [dev] de apps/orchestrator: pip install -e ".[dev]").
+Requiere `sounddevice`, `websockets` y `numpy` (extra [dev] de apps/orchestrator).
 Hablá al micrófono; cuando el VAD detecta que terminaste de hablar, el servidor transcribe
-con faster-whisper y sigue con el turno normal (RAG + LLM + tools) como si lo hubieras escrito.
+con faster-whisper, sigue con el turno normal (RAG + LLM + tools), y esta vez también vas a
+escuchar la respuesta sintetizada con Piper-TTS a medida que llega.
 """
 
 import asyncio
 import json
+import queue
 import sys
 
 import numpy as np
 import sounddevice as sd
 import websockets
 
-SAMPLE_RATE = 16000
+SAMPLE_RATE_IN = 16000
 FRAME_MS = 30
-FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000
+FRAME_SAMPLES = SAMPLE_RATE_IN * FRAME_MS // 1000
 AUDIO_IN_HEADER = bytes([0x01])
+AUDIO_OUT_HEADER = 0x02
+
+
+def crear_reproductor(sample_rate: int) -> tuple[sd.OutputStream, "queue.Queue[np.ndarray]"]:
+    cola: queue.Queue[np.ndarray] = queue.Queue()
+    pendiente = np.zeros(0, dtype=np.float32)
+
+    def callback(outdata, frames, time_info, status) -> None:
+        nonlocal pendiente
+        if status:
+            print(f"[audio warning] {status}", file=sys.stderr)
+
+        listo = 0
+        while listo < frames:
+            if pendiente.size == 0:
+                try:
+                    pendiente = cola.get_nowait()
+                except queue.Empty:
+                    outdata[listo:, 0] = 0.0
+                    return
+            usar = min(frames - listo, pendiente.size)
+            outdata[listo : listo + usar, 0] = pendiente[:usar]
+            pendiente = pendiente[usar:]
+            listo += usar
+
+    stream = sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32", callback=callback)
+    return stream, cola
 
 
 async def main() -> None:
@@ -27,25 +56,40 @@ async def main() -> None:
     print(f"Conectando a {uri} ...")
 
     loop = asyncio.get_event_loop()
-    audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
+    mic_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    def on_audio(indata, frames, time_info, status) -> None:
+    def on_mic_audio(indata, frames, time_info, status) -> None:
         if status:
             print(f"[mic warning] {status}", file=sys.stderr)
         pcm16 = np.clip(indata[:, 0] * 32767, -32768, 32767).astype(np.int16).tobytes()
-        loop.call_soon_threadsafe(audio_queue.put_nowait, pcm16)
+        loop.call_soon_threadsafe(mic_queue.put_nowait, pcm16)
 
     async with websockets.connect(uri) as ws:
+        primer_mensaje = json.loads(await ws.recv())
+        if primer_mensaje.get("tipo") != "audio_meta":
+            raise RuntimeError(f"Se esperaba 'audio_meta' como primer mensaje, llegó: {primer_mensaje}")
+
+        playback_stream, playback_queue = crear_reproductor(primer_mensaje["sample_rate"])
+        playback_stream.start()
+
         print("Conectado. Hablá al micrófono (Ctrl+C para salir).\n")
 
         async def enviar_audio() -> None:
             while True:
-                pcm = await audio_queue.get()
+                pcm = await mic_queue.get()
                 await ws.send(AUDIO_IN_HEADER + pcm)
 
         async def recibir_mensajes() -> None:
             while True:
                 raw = await ws.recv()
+
+                if isinstance(raw, bytes):
+                    if not raw or raw[0] != AUDIO_OUT_HEADER:
+                        continue
+                    pcm16 = np.frombuffer(raw[1:], dtype=np.int16).astype(np.float32) / 32768.0
+                    playback_queue.put(pcm16)
+                    continue
+
                 msg = json.loads(raw)
                 tipo = msg.get("tipo")
 
@@ -72,7 +116,7 @@ async def main() -> None:
                     print(f"\n[error] {msg['mensaje']}")
 
         with sd.InputStream(
-            samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=FRAME_SAMPLES, callback=on_audio
+            samplerate=SAMPLE_RATE_IN, channels=1, dtype="float32", blocksize=FRAME_SAMPLES, callback=on_mic_audio
         ):
             await asyncio.gather(enviar_audio(), recibir_mensajes())
 

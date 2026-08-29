@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capacidades de la ventana principal — sin permisos custom, esta fase no usa comandos Rust ni plugins de Tauri.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
