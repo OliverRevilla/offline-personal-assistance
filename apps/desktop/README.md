@@ -12,6 +12,7 @@ Owner: `frontend-engineer`. Ver [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.m
 
 - Node.js LTS (18+).
 - Rust + Cargo ([rustup.rs](https://rustup.rs)).
+- **Toolchain de C++ de Visual Studio** (Visual Studio Installer → workload "Desktop development with C++", o los "Build Tools for Visual Studio" standalone si no querés el IDE completo) — Tauri necesita esto para compilar la parte de Rust en Windows. Sin esto, `npm run tauri dev`/`cargo build` fallan con errores de linker (`link.exe not found` o similares), no con un error de nuestro código.
 - Tauri CLI: se instala como dependencia de desarrollo (`@tauri-apps/cli`, ya en `package.json`), no hace falta instalarlo global.
 - En Windows, Tauri usa WebView2 (viene preinstalado en Windows 10/11 actualizados; si falta, el instalador de Tauri/Edge lo resuelve).
 
@@ -26,8 +27,8 @@ npm run tauri dev
 
 Esto levanta `next dev` (vía `beforeDevCommand` en `tauri.conf.json`) y abre la ventana de Tauri apuntando a `http://localhost:3000`. Requiere que el backend (`apps/orchestrator`, en WSL2) ya esté corriendo — ver la raíz de `GUIDE.md`.
 
-## Estado actual (Fase 6 del roadmap)
+## Estado actual (Fase 7 del roadmap)
 
-Todo lo de las fases 1-5 (texto, RAG, tool calling con confirmación, voz de entrada y salida) ahora con una UI real: conversación en pantalla, botón de micrófono, reproducción de audio, y la barra de confirmación para operaciones destructivas (`actualizar_nota`).
+Todo lo de las fases 1-5 (texto, RAG, tool calling con confirmación, voz de entrada y salida) con una UI real: conversación en pantalla, botón de micrófono, reproducción de audio, y la barra de confirmación para operaciones destructivas (`actualizar_nota`). El cliente WS (`src/lib/ws-client.ts`) reconecta solo con backoff exponencial si se cae la conexión, y avisa en la UI que el contexto de la conversación anterior se perdió.
 
 No incluye todavía: empaquetado/instalador (Fase 8 — íconos de la app tampoco existen aún, ver `src-tauri/icons/README.md`), ni ningún comando Rust custom (no hace falta ninguno para esta fase).

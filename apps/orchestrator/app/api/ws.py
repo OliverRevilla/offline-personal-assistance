@@ -1,11 +1,13 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.config import settings
+from app.core.metrics import metrics
 from app.llm.ollama_client import SYSTEM_PROMPT, stream_chat
 from app.rag.retriever import format_context, retrieve
 from app.stt.vad_segmenter import VadSegmenter
@@ -40,16 +42,33 @@ MAX_TOOL_ITERATIONS = 5
 
 
 async def pedir_confirmacion(websocket: WebSocket, nombre: str, argumentos: dict) -> bool:
-    """Pausa el turno hasta que el cliente confirme o rechace una tool destructiva."""
+    """Pausa el turno hasta que el cliente confirme o rechace una tool destructiva.
+
+    Usa el `receive()` genérico (no `receive_json()`) porque el cliente puede seguir
+    mandando frames de audio (ej. si sigue hablando) mientras hay una confirmación
+    pendiente — esos se descartan acá en vez de romper el turno (Fase 7).
+    """
     confirmation_id = str(uuid.uuid4())
     await websocket.send_json(
         {"tipo": "confirmacion_requerida", "id": confirmation_id, "nombre": nombre, "argumentos": argumentos}
     )
 
     while True:
-        data = await websocket.receive_json()
+        message = await websocket.receive()
+        if message["type"] == "websocket.disconnect":
+            raise WebSocketDisconnect(code=message.get("code", 1000))
+
+        if message.get("bytes") is not None:
+            logger.warning("Frame de audio descartado: hay una confirmación pendiente (id=%s)", confirmation_id)
+            continue
+
+        if message.get("text") is None:
+            continue
+        data = json.loads(message["text"])
+
         if data.get("tipo") == "confirmacion_respuesta" and data.get("id") == confirmation_id:
             return bool(data.get("aprobado"))
+
         await websocket.send_json(
             {"tipo": "error", "mensaje": "Hay una confirmación pendiente; respondé a ella antes de continuar."}
         )
@@ -66,7 +85,9 @@ async def hablar_oraciones(websocket: WebSocket, cola: "asyncio.Queue[str | None
         try:
             if oracion is None:
                 break
+            inicio = time.monotonic()
             audio = await synthesize(oracion)
+            metrics.record_tts_latency((time.monotonic() - inicio) * 1000)
             await websocket.send_bytes(bytes([AUDIO_OUT_HEADER]) + audio)
         except Exception:  # noqa: BLE001 - un fallo de síntesis no debe tumbar el turno de texto
             logger.exception("Fallo al sintetizar/enviar audio para: %r", oracion)
@@ -103,8 +124,14 @@ async def procesar_turno(websocket: WebSocket, history: list[dict], texto: str) 
                 respuesta_ronda = ""
                 tool_calls: list[dict] = []
 
+                inicio_ronda = time.monotonic()
+                primer_token_visto = False
+
                 async for event in stream_chat(messages, tools=TOOL_SCHEMAS):
                     if event["type"] == "token":
+                        if iteracion == 0 and not primer_token_visto:
+                            metrics.record_llm_ttfb((time.monotonic() - inicio_ronda) * 1000)
+                            primer_token_visto = True
                         respuesta_ronda += event["content"]
                         await websocket.send_json({"tipo": "token", "texto": event["content"]})
                         for oracion in sentence_buffer.feed(event["content"]):
@@ -172,7 +199,9 @@ async def procesar_audio(websocket: WebSocket, history: list[dict], segmenter: V
     if utterance is None:
         return
 
+    inicio = time.monotonic()
     texto = await asyncio.to_thread(transcribe_pcm16, websocket.app.state.whisper_model, utterance)
+    metrics.record_stt_latency((time.monotonic() - inicio) * 1000)
     await websocket.send_json({"tipo": "transcript_final", "texto": texto})
 
     texto = texto.strip()

@@ -43,7 +43,17 @@ export function ChatApp() {
 
   useEffect(() => {
     const client = new WsClient(WS_URL, {
-      onOpen: () => setConnectionState("open"),
+      onOpen: (wasReconnect) => {
+        setConnectionState("open");
+        if (wasReconnect) {
+          currentAssistantTextRef.current = "";
+          appendMessage({
+            id: nuevoId(),
+            role: "system",
+            text: "Reconectado — el contexto de la conversación anterior a este punto se perdió (el server empieza una sesión nueva por conexión).",
+          });
+        }
+      },
       onClose: () => setConnectionState("closed"),
       onError: () => setConnectionState("closed"),
       onAudioOut: (pcm16) => playbackRef.current?.enqueue(pcm16),

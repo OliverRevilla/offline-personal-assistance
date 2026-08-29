@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -7,11 +6,13 @@ from fastapi import FastAPI
 
 from app.api.ws import router as ws_router
 from app.core.config import settings
+from app.core.logging_config import configure_logging
+from app.core.metrics import metrics
 from app.rag.store import get_client
 from app.stt.whisper_client import load_whisper_model
 from app.tts.piper_client import load_voice_sample_rate, verify_piper_available
 
-logging.basicConfig(level=settings.log_level.upper())
+configure_logging(settings.log_level)
 
 
 @asynccontextmanager
@@ -35,3 +36,10 @@ app.include_router(ws_router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics_endpoint() -> dict:
+    """Latencias mínimas (Fase 7): TTFB del LLM, latencia de STT y de TTS, últimas 200 muestras
+    de cada una. Sin Prometheus — ver app/core/metrics.py."""
+    return metrics.snapshot()

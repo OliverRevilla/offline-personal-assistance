@@ -94,7 +94,7 @@ Cada conexión WS tiene su propio `VadSegmenter` (`app/stt/vad_segmenter.py`), c
 4. Esa utterance se transcribe con faster-whisper (`app/stt/whisper_client.py`, CPU, `asyncio.to_thread` porque `transcribe()` es bloqueante) y el texto resultante se manda al cliente como `{"tipo": "transcript_final", "texto": ...}`.
 5. Ese mismo texto entra a `procesar_turno` — el mismo camino que sigue un `user_message` de texto (RAG + LLM + tool calling). Para el resto del pipeline, hablar o escribir es indistinguible.
 
-No hay reconexión/backpressure especial todavía si el cliente manda audio más rápido de lo que se puede transcribir (Fase 7).
+No hay backpressure especial todavía si el cliente manda audio más rápido de lo que se puede transcribir (no resuelto en la Fase 7 — no hay evidencia de que sea un problema real en el uso mono-usuario actual).
 
 ### 3.5 TTS (texto ↔ audio)
 Piper corre como subproceso CLI, no como librería Python cargada en memoria (ver [ADR 0007](adr/0007-piper-como-subproceso-cli.md) — evita depender de otra extensión compilada frágil entre versiones de Python, después de los dolores de cabeza de `ctranslate2`/`webrtcvad`).
@@ -104,6 +104,13 @@ Piper corre como subproceso CLI, no como librería Python cargada en memoria (ve
 3. El streaming de **texto** (`token`) y el de **audio** son independientes: la síntesis de una oración no bloquea que sigan llegando tokens de texto de la oración siguiente — así el audio puede empezar a sonar antes de que el LLM termine de generar el mensaje completo.
 4. Al cerrar el turno (incluso si hubo un error), se manda un sentinel `None` a la cola y se espera a que el worker termine de mandar todo el audio pendiente antes de emitir `turn_end` — así el cliente sabe que no va a llegar más audio de ese turno.
 5. Un fallo de síntesis (Piper no disponible, oración rara, etc.) se loguea y se descarta esa oración puntual — no tumba el resto del turno (mismo criterio de resiliencia que RAG).
+
+### 3.6 Hardening y observabilidad (Fase 7)
+- **Reconexión**: `history` (y todo el estado de la conexión — segmentador VAD, etc.) vive por conexión WS, no persiste entre reconexiones (ver "Persistencia de la conversación" en `docs/ROADMAP.md`, incorporación futura no implementada). El frontend (`apps/desktop/src/lib/ws-client.ts`) reconecta solo, con backoff exponencial (1s, 2s, 4s... hasta 10s tope), y avisa en la UI que el contexto previo se perdió cuando la reconexión sucede.
+- **Desconexión a mitad de turno**: si el cliente se va mientras `pedir_confirmacion` espera su respuesta (o en cualquier punto donde el server esté haciendo `websocket.receive()`), se detecta como `WebSocketDisconnect` y se propaga hasta el handler externo sin dejar el `tts_task` de esa conexión huérfano (el `finally` de `procesar_turno` lo cierra siempre). Frames de audio llegando mientras hay una confirmación pendiente se descartan (logueados), no rompen el turno.
+- **Logging estructurado**: una línea JSON por evento (`app/core/logging_config.py`), sin dependencias nuevas.
+- **Métricas mínimas** (`app/core/metrics.py`, expuestas en `GET /metrics`): TTFB del LLM (primer token del primer round de cada turno), latencia de STT (duración de `transcribe_pcm16`), latencia de TTS (duración de `synthesize` por oración) — últimas 200 muestras de cada una, sin persistencia entre reinicios. Sin Prometheus/Grafana: para un sistema mono-usuario, esto alcanza (ver `.claude/agents/devops-engineer.md`).
+- **Tests de integración end-to-end** (`apps/orchestrator/tests/test_integration_turno.py`): ejercitan `/ws/chat` de punta a punta vía `TestClient.websocket_connect`, mockeando Ollama/Piper/Qdrant — turno de texto simple, tool calling, confirmación aprobada/rechazada, audio durante confirmación pendiente, y desconexión a mitad de turno.
 
 ## 4. Gestión de VRAM (responsabilidad cruzada software-architect / devops-engineer)
 - Ollama debe configurarse con un `keep_alive` explícito — no infinito por default — para poder liberar VRAM si el sistema detecta presión de memoria.
