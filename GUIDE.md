@@ -416,6 +416,11 @@ Además de Node.js y Rust/Cargo (ya mencionados en la Fase 6): en Windows, Tauri
 4. Lentitud notable en `npm install` (varios minutos) o en la primera compilación de `cargo` es **esperado** trabajando contra la ruta de red (ver la adenda del ADR 0008) — no es un signo de que algo esté mal, es el costo de la decisión de usar un solo checkout.
 5. Si aparecen errores de permisos al escribir archivos (ej. `EPERM`, `EACCES` en `node_modules/` o `target/`), y persisten después de reintentar: es la señal concreta de "esto ya no vale la pena" que menciona la adenda del ADR 0008 — ahí sí conviene migrar a un clon separado en NTFS nativo de Windows en vez de seguir peleando con la ruta de red.
 
+**(I) `npm run tauri dev` (o `npm run tauri -- --version`) tira `Couldn't recognize the current folder as a Tauri project`, aunque `src-tauri/tauri.conf.json` exista exactamente ahí.**
+No es un problema de Tauri ni del repo — es que `npm` en Windows corre los scripts vía `cmd.exe` por default, y `cmd.exe` **rechaza una ruta UNC como directorio actual**, cayendo en silencio a `C:\Windows` (mirá bien el output completo del comando: `cmd.exe` deja un aviso tipo *"No se permiten rutas UNC. Regresando de manera predeterminada al directorio Windows."*, fácil de pasar por alto entre el resto de la salida). El binario de `tauri` termina heredando `C:\Windows` como directorio, no `apps\desktop` — por eso "no encuentra" el proyecto. Mapear una letra de unidad con `net use` **no soluciona esto** (`\\wsl.localhost\...` no es un recurso SMB real, `net use` no lo mapea como una unidad de red genuina).
+
+Fix ya aplicado en el repo: `apps/desktop/.npmrc` con `script-shell=powershell.exe` (PowerShell sí soporta UNC como directorio actual). Si ya tenés el repo actualizado y sigue pasando, confirmá que ese archivo existe y tiene esa línea — ver la adenda 2 del ADR 0008 para el detalle completo.
+
 ## 4. Observaciones importantes mientras testeás
 
 - **El frontend (Fase 6) es la única pieza que corre nativo en Windows, a propósito** — el backend sigue 100% en WSL2. No es una contradicción del ADR 0006 (ese ADR habla de no duplicar el *mismo servicio* entre los dos lados, típicamente Ollama); acá son dos procesos distintos hablándose por WebSocket. Ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`.

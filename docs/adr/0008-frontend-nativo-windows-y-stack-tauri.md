@@ -24,6 +24,13 @@ Opciones consideradas:
 
 **Decisión**: opción 2, confirmada explícitamente con el usuario — prioriza un solo checkout por sobre la performance/robustez máxima. Si en la práctica `npm install`/`cargo build`/el hot-reload de `next dev` resultan demasiado lentos o dan problemas raros de permisos, ese es el momento de reconsiderar y migrar a la opción 1 — no antes.
 
+## Adenda 2: `npm run tauri dev` no reconocía el proyecto — causa real y fix
+Síntoma: `tauri dev` fallaba con `Couldn't recognize the current folder as a Tauri project` **a pesar de que `src-tauri/tauri.conf.json` existía** exactamente donde debía. Mapear la ruta UNC a una letra de unidad con `net use` no lo resolvió (`\\wsl.localhost\...` no es un recurso SMB real, es un proveedor de filesystem especial de WSL — `net use` no lo trata como una unidad de red genuina para este propósito).
+
+**Causa real, confirmada**: `npm` en Windows corre los scripts de `package.json` a través de `cmd.exe` por default, y `cmd.exe` **rechaza explícitamente** una ruta UNC como su directorio actual — cae de vuelta a `C:\Windows` en silencio (con un aviso en stderr que es fácil no ver: *"CMD.EXE se inició con esta ruta como el directorio actual. No se permiten rutas UNC. Regresando de manera predeterminada al directorio Windows."*). El binario de `tauri` arranca heredando ese `cwd` equivocado (`C:\Windows`), no `apps\desktop` — por eso "no encuentra" el proyecto.
+
+**Fix**: `apps/desktop/.npmrc` con `script-shell=powershell.exe` — PowerShell sí soporta una ruta UNC como directorio actual sin rechazarla, así que el proceso hijo (`tauri`, y por lo tanto `cargo` cuando `tauri` lo invoca internamente) hereda el `cwd` correcto. Es un archivo commiteado al repo, no un workaround que cada quien tiene que recordar aplicar.
+
 ## Consecuencias
 - Instalar Node.js + Rust + Tauri CLI **en Windows**, no en la WSL2 donde vive el backend — un entorno de desarrollo más para el proyecto, documentado por separado en `GUIDE.md`.
 - Los íconos de la app (`src-tauri/icons/`) no existen todavía — no hacen falta para `tauri dev`, pero si son necesarios para `tauri build` (Fase 8, empaquetado). No bloquea esta fase.

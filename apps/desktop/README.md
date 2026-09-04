@@ -37,6 +37,8 @@ npm run tauri dev
 
 (Si tu Windows es más viejo y `\\wsl.localhost\` no resuelve, probá `\\wsl$\` en su lugar — es el alias anterior, debería apuntar a lo mismo.)
 
+**Nota sobre `.npmrc`**: este directorio incluye un `.npmrc` con `script-shell=powershell.exe` — sin eso, `npm run tauri dev` falla con `Couldn't recognize the current folder as a Tauri project` porque `npm` en Windows corre los scripts vía `cmd.exe` por default, y `cmd.exe` rechaza una ruta UNC como directorio actual (cae a `C:\Windows` en silencio). Ver la adenda 2 de `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md` para el detalle completo — ya está resuelto en el repo, no hace falta que hagas nada extra, pero si alguna vez ves ese error de nuevo, es lo primero a revisar.
+
 **Si el hot-reload de `next dev` no detecta tus cambios** (guardás un archivo y la ventana no se actualiza sola): es un síntoma conocido del file-watching nativo de Windows cruzando al filesystem de WSL2 por la ruta de red. Como workaround, parar y volver a correr `npm run tauri dev` después de cada cambio suele alcanzar mientras se prueba esto; si se vuelve molesto de verdad, ese es el momento de reconsiderar el clon separado en NTFS nativo (ver la adenda del ADR 0008), no antes.
 
 Esto levanta `next dev` (vía `beforeDevCommand` en `tauri.conf.json`) y abre la ventana de Tauri apuntando a `http://localhost:3000`. Requiere que el backend (`apps/orchestrator`, en WSL2) ya esté corriendo — ver la raíz de `GUIDE.md`.
