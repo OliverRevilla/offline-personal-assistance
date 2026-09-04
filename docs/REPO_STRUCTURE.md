@@ -43,7 +43,8 @@ offline-personal-assistance/
 │   ├── ARCHITECTURE.md
 │   ├── ROADMAP.md
 │   ├── REPO_STRUCTURE.md
-│   └── adr/                      # Architecture Decision Records
+│   ├── adr/                      # Architecture Decision Records
+│   └── learning/                 # guías de aprendizaje (Rust, JS/TS) ancladas a este repo, para el usuario
 │
 ├── .claude/
 │   └── agents/                   # subagentes de desarrollo (este documento los referencia)
