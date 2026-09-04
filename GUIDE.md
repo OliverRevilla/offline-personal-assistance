@@ -219,18 +219,22 @@ Fuera de alcance de esta fase (no busques esto todavía)
 
 ### 3.8 Frontend: la app de escritorio (✔ Fase 6)
 
-**Esto corre en Windows nativo, no en WSL2** (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend (`apps/orchestrator`) tiene que seguir corriendo en WSL2 mientras probás esto.
+**El proceso corre en Windows nativo, no en WSL2** (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend (`apps/orchestrator`) tiene que seguir corriendo en WSL2 mientras probás esto.
 
-Requisitos en Windows (una sola vez): Node.js LTS, y Rust vía [rustup.rs](https://rustup.rs). No hace falta instalar la Tauri CLI global, es una dependencia de npm.
+**Ojo con esto:** el repo entero (`apps/desktop` incluido) vive en el filesystem de WSL2, no en uno nativo de Windows — no hay un `C:\...\apps\desktop` real. El frontend nativo de Windows accede a esos mismos archivos vía la ruta de red `\\wsl.localhost\<distro>\...` (decisión explícita, ver la adenda del ADR 0008). Instrucciones completas de cómo armar esa ruta en [apps/desktop/README.md](apps/desktop/README.md#cómo-correr) — acá el resumen:
+
+Requisitos en Windows (una sola vez): Node.js LTS, Rust vía [rustup.rs](https://rustup.rs), y el toolchain de C++ de Visual Studio (ver `apps/desktop/README.md` — sin esto, `cargo` falla con errores de linker). No hace falta instalar la Tauri CLI global, es una dependencia de npm.
 
 ```powershell
-cd apps\desktop
+wsl -l -v   # confirmá el nombre exacto de tu distro (ej. "Ubuntu")
+
+cd \\wsl.localhost\Ubuntu\home\tu-usuario\ruta\a\offline-personal-assistance\apps\desktop
 npm install
 copy .env.local.example .env.local
 npm run tauri dev
 ```
 
-La primera vez, `cargo` va a compilar bastante (es la primera build de Tauri) — puede tardar varios minutos. Se abre una ventana nativa con la UI.
+La primera vez, `cargo` va a compilar bastante (es la primera build de Tauri) — puede tardar varios minutos, y más todavía por estar corriendo contra la ruta de red en vez de NTFS nativo (esperable, no es un error). Se abre una ventana nativa con la UI.
 
 **✔ Fase 6 si:** con el backend corriendo en WSL2, la ventana conecta ("Conectado" en la barra de estado), podés escribir un mensaje y ver la respuesta en pantalla + escucharla, y activando el micrófono (🎙️) podés hablarle y que responda por voz — el mismo flujo end-to-end de las fases 1-5, ahora con UI real en vez de scripts de consola.
 
@@ -351,9 +355,9 @@ Invoke-RestMethod http://localhost:8000/health
 ```
 Si esto falla acá, **no tiene sentido seguir con Tauri todavía** — andá directo a la sección de troubleshooting (A) más abajo. Si esto funciona, el 90% del riesgo de la topología cruzada ya está descartado.
 
-**6. Windows — frontend:**
+**6. Windows — frontend** (el repo vive en WSL2, accedé vía `\\wsl.localhost\`, ver 3.8 y `apps/desktop/README.md`):
 ```powershell
-cd apps\desktop
+cd \\wsl.localhost\Ubuntu\home\tu-usuario\ruta\a\offline-personal-assistance\apps\desktop
 npm run tauri dev
 ```
 
@@ -404,6 +408,13 @@ npm run tauri dev
 
 **(G) `npm install` o `npm run tauri dev` falla compilando la parte de Rust.**
 Además de Node.js y Rust/Cargo (ya mencionados en la Fase 6): en Windows, Tauri necesita el **toolchain de compilación de C++ de Visual Studio** (Visual Studio Installer → workload "Desktop development with C++", o los "Build Tools for Visual Studio" standalone si no querés instalar el IDE completo). Sin esto, la compilación del binario Rust falla con errores de linker (`link.exe not found` o similares) — no es un error de nuestro código, es un prerequisito de la toolchain de Windows para cualquier proyecto Rust/Tauri.
+
+**(H) `cd \\wsl.localhost\...` falla, o `npm install`/`npm run tauri dev` son exageradamente lentos o dan errores raros de permisos ahí.**
+1. Confirmá el nombre exacto de la distro con `wsl -l -v` desde PowerShell — un typo ahí (ej. `Ubuntu-22.04` vs `Ubuntu`) hace que la ruta no exista.
+2. Confirmá que la distro esté corriendo (`wsl -l -v` muestra el estado) — si está `Stopped`, arrancala entrando una vez con `wsl` antes de que Windows pueda resolver la ruta de red.
+3. Si `\\wsl.localhost\<distro>\...` no resuelve en absoluto, probá el alias viejo `\\wsl$\<distro>\...` — en versiones de Windows algo más viejas es el único que funciona.
+4. Lentitud notable en `npm install` (varios minutos) o en la primera compilación de `cargo` es **esperado** trabajando contra la ruta de red (ver la adenda del ADR 0008) — no es un signo de que algo esté mal, es el costo de la decisión de usar un solo checkout.
+5. Si aparecen errores de permisos al escribir archivos (ej. `EPERM`, `EACCES` en `node_modules/` o `target/`), y persisten después de reintentar: es la señal concreta de "esto ya no vale la pena" que menciona la adenda del ADR 0008 — ahí sí conviene migrar a un clon separado en NTFS nativo de Windows en vez de seguir peleando con la ruta de red.
 
 ## 4. Observaciones importantes mientras testeás
 

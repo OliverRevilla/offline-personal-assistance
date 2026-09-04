@@ -15,6 +15,15 @@ Confirmado explícitamente con el usuario antes de implementar (no es una decisi
 - **Sin librería de estado/UI adicional** (nada de Redux/Zustand/Tailwind): la complejidad de esta pantalla no lo justifica — `useState`/`useRef` de React alcanzan.
 - **Contrato del protocolo WS duplicado a mano** en `src/lib/protocol.ts` (TypeScript), no generado desde el lado Python. `packages/shared-contracts/` sigue vacío a propósito — recién se justifica el codegen si el protocolo diverge en la práctica y causa un bug real, no antes.
 
+## Adenda: dónde viven los archivos (no es lo mismo que dónde corre el proceso)
+Esta decisión original solo cubrió *dónde corre el proceso* (Windows nativo) y asumió implícitamente que eso resolvía el acceso a los archivos — no es así, porque el repo entero vive en el filesystem de WSL2 (ruta Linux, ej. `/home/<usuario>/.../offline-personal-assistance`), no en el filesystem nativo de Windows.
+
+Opciones consideradas:
+1. **Clon separado en NTFS nativo de Windows**: rápido y sin rarezas para `npm`/`cargo`, pero implica dos checkouts del mismo repo que hay que mantener sincronizados (pull en ambos lados).
+2. **Acceder al mismo checkout de WSL2 desde Windows vía `\\wsl.localhost\<distro>\...`**: un solo checkout, sin nada que sincronizar — pero `npm`/`cargo` corriendo contra esa ruta de red (protocolo 9P) son conocidos por ser más lentos que sobre NTFS nativo, y hay reportes de rarezas de permisos/symlinks/file-watching en ese cruce específico.
+
+**Decisión**: opción 2, confirmada explícitamente con el usuario — prioriza un solo checkout por sobre la performance/robustez máxima. Si en la práctica `npm install`/`cargo build`/el hot-reload de `next dev` resultan demasiado lentos o dan problemas raros de permisos, ese es el momento de reconsiderar y migrar a la opción 1 — no antes.
+
 ## Consecuencias
 - Instalar Node.js + Rust + Tauri CLI **en Windows**, no en la WSL2 donde vive el backend — un entorno de desarrollo más para el proyecto, documentado por separado en `GUIDE.md`.
 - Los íconos de la app (`src-tauri/icons/`) no existen todavía — no hacen falta para `tauri dev`, pero si son necesarios para `tauri build` (Fase 8, empaquetado). No bloquea esta fase.

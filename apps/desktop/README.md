@@ -6,7 +6,9 @@ Owner: `frontend-engineer`. Ver [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.m
 
 ## Dónde corre esto
 
-**Nativo en Windows** — no dentro de WSL2 (a diferencia del backend). El backend sigue viviendo en WSL2 sin cambios; este frontend le habla por WebSocket a `ws://localhost:8000/ws/chat`, que WSL2 expone solo hacia Windows. Ver el ADR 0008 para el porqué.
+**El proceso** (Node/npm/Tauri) corre **nativo en Windows** — no dentro de WSL2 (a diferencia del backend). El backend sigue viviendo en WSL2 sin cambios; este frontend le habla por WebSocket a `ws://localhost:8000/ws/chat`, que WSL2 expone solo hacia Windows. Ver el ADR 0008 para el porqué.
+
+**Los archivos**, en cambio, siguen viviendo en el filesystem de WSL2 (es el mismo checkout del repo, no uno separado) — el frontend nativo de Windows los accede vía la ruta de red `\\wsl.localhost\<distro>\...` (ver la adenda del ADR 0008 para el trade-off de esta elección vs. clonar el repo también en NTFS nativo). Esto es más lento que trabajar sobre NTFS nativo — es esperable que `npm install`/`cargo build` tarden más de lo que tardarían en Windows puro, no es un signo de que algo esté mal.
 
 ## Requisitos (en Windows, no en WSL2)
 
@@ -18,12 +20,24 @@ Owner: `frontend-engineer`. Ver [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.m
 
 ## Cómo correr
 
+Primero encontrá la ruta de red a tu repo (desde PowerShell, para saber el nombre exacto de tu distro):
+
 ```powershell
-cd apps\desktop
+wsl -l -v
+```
+
+Y desde dentro de WSL2, la ruta absoluta del repo (`pwd` parado en la raíz del repo). Combinás ambas cosas en `\\wsl.localhost\<DistroName>\<ruta-absoluta-de-pwd>`. Por ejemplo, si `wsl -l -v` dice `Ubuntu` y `pwd` dice `/home/tu-usuario/proyectos/offline-personal-assistance`:
+
+```powershell
+cd \\wsl.localhost\Ubuntu\home\tu-usuario\proyectos\offline-personal-assistance\apps\desktop
 npm install
 copy .env.local.example .env.local
 npm run tauri dev
 ```
+
+(Si tu Windows es más viejo y `\\wsl.localhost\` no resuelve, probá `\\wsl$\` en su lugar — es el alias anterior, debería apuntar a lo mismo.)
+
+**Si el hot-reload de `next dev` no detecta tus cambios** (guardás un archivo y la ventana no se actualiza sola): es un síntoma conocido del file-watching nativo de Windows cruzando al filesystem de WSL2 por la ruta de red. Como workaround, parar y volver a correr `npm run tauri dev` después de cada cambio suele alcanzar mientras se prueba esto; si se vuelve molesto de verdad, ese es el momento de reconsiderar el clon separado en NTFS nativo (ver la adenda del ADR 0008), no antes.
 
 Esto levanta `next dev` (vía `beforeDevCommand` en `tauri.conf.json`) y abre la ventana de Tauri apuntando a `http://localhost:3000`. Requiere que el backend (`apps/orchestrator`, en WSL2) ya esté corriendo — ver la raíz de `GUIDE.md`.
 
