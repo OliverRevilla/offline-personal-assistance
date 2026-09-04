@@ -22,7 +22,7 @@ Detalle completo de cada fase: `docs/ROADMAP.md` en el repo — incluye una secc
 - Docker + Docker Compose v2 (`docker compose version`), con la integración de Docker Desktop con WSL2 activada (o el Docker Engine instalado directo dentro de la distro).
 - GPU: con Ollama nativo (caso por defecto), alcanza con los drivers NVIDIA/CUDA de WSL2 — confirmá con `nvidia-smi` corrido *desde dentro de WSL2*. El NVIDIA Container Toolkit (`docker-compose.gpu.yml`) solo hace falta si usás el escenario alternativo de Ollama containerizado (ver `docker/README.md`).
 - **Python 3.11 o 3.12** para el venv de `apps/orchestrator` (prudencia de compatibilidad con `ctranslate2`; instalable en Ubuntu con `sudo apt install python3.12 python3.12-venv` si no viene por default). Si te aparece `ModuleNotFoundError: pkg_resources` al levantar el server, **no es un tema de versión de Python** — ver `docs/adr/0005-pkg-resources-pin-setuptools.md`.
-- **Node.js LTS + Rust/Cargo, instalados en Windows nativo** (no en WSL2) para `apps/desktop` — a diferencia de todo lo demás, el frontend Tauri corre nativo en Windows a propósito (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend en WSL2 no se toca.
+- **Node.js LTS + Rust/Cargo, instalados en Windows nativo** (no en WSL2) para `apps/desktop` — a diferencia de todo lo demás, el frontend Tauri corre nativo en Windows a propósito (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend en WSL2 no se toca. Además, **el repo está clonado dos veces** (uno en WSL2, otro en NTFS nativo de Windows solo para el frontend) — no es el mismo checkout accedido desde los dos lados, ver la adenda 3 del ADR 0008 antes de intentar "simplificarlo" a un solo checkout.
 
 ## 3. Walkthrough completo: de cero hasta validar lo que está hecho
 
@@ -221,20 +221,24 @@ Fuera de alcance de esta fase (no busques esto todavía)
 
 **El proceso corre en Windows nativo, no en WSL2** (ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`). El backend (`apps/orchestrator`) tiene que seguir corriendo en WSL2 mientras probás esto.
 
-**Ojo con esto:** el repo entero (`apps/desktop` incluido) vive en el filesystem de WSL2, no en uno nativo de Windows — no hay un `C:\...\apps\desktop` real. El frontend nativo de Windows accede a esos mismos archivos vía la ruta de red `\\wsl.localhost\<distro>\...` (decisión explícita, ver la adenda del ADR 0008). Instrucciones completas de cómo armar esa ruta en [apps/desktop/README.md](apps/desktop/README.md#cómo-correr) — acá el resumen:
+**Ojo con esto:** hay **dos checkouts del repo**, no uno accedido desde dos lados. Se probó primero acceder al mismo checkout de WSL2 desde Windows vía `\\wsl.localhost\<distro>\...`, y se abandonó — `cmd.exe` en Windows rechaza estructuralmente una ruta UNC como directorio de trabajo de un proceso, y eso rompía `npm run tauri dev` sin un fix limpio (adendas 2 y 3 del ADR 0008). La solución final es un **segundo clon del repo en el filesystem nativo de Windows (NTFS)**, usado solo para `apps/desktop`. Instrucciones completas en [apps/desktop/README.md](apps/desktop/README.md#cómo-correr) — acá el resumen:
 
 Requisitos en Windows (una sola vez): Node.js LTS, Rust vía [rustup.rs](https://rustup.rs), y el toolchain de C++ de Visual Studio (ver `apps/desktop/README.md` — sin esto, `cargo` falla con errores de linker). No hace falta instalar la Tauri CLI global, es una dependencia de npm.
 
 ```powershell
-wsl -l -v   # confirmá el nombre exacto de tu distro (ej. "Ubuntu")
+# una sola vez: clonar el repo en NTFS nativo (no en \\wsl.localhost\...)
+cd C:\Users\tu-usuario\proyectos
+git clone \\wsl.localhost\Ubuntu\home\tu-usuario\ruta\a\offline-personal-assistance offline-personal-assistance
 
-cd \\wsl.localhost\Ubuntu\home\tu-usuario\ruta\a\offline-personal-assistance\apps\desktop
+cd C:\Users\tu-usuario\proyectos\offline-personal-assistance\apps\desktop
 npm install
 copy .env.local.example .env.local
 npm run tauri dev
 ```
 
-La primera vez, `cargo` va a compilar bastante (es la primera build de Tauri) — puede tardar varios minutos, y más todavía por estar corriendo contra la ruta de red en vez de NTFS nativo (esperable, no es un error). Se abre una ventana nativa con la UI.
+La primera vez, `cargo` va a compilar bastante (es la primera build de Tauri) — puede tardar varios minutos. Se abre una ventana nativa con la UI.
+
+**De acá en adelante, cada cambio en `apps/desktop` necesita `git pull` en ESTE clon de Windows también** — no solo en el de WSL2. Son dos checkouts independientes.
 
 **✔ Fase 6 si:** con el backend corriendo en WSL2, la ventana conecta ("Conectado" en la barra de estado), podés escribir un mensaje y ver la respuesta en pantalla + escucharla, y activando el micrófono (🎙️) podés hablarle y que responda por voz — el mismo flujo end-to-end de las fases 1-5, ahora con UI real en vez de scripts de consola.
 
@@ -249,7 +253,7 @@ La primera vez, `cargo` va a compilar bastante (es la primera build de Tauri) �
 - [ ] Cerrar la ventana no deja el backend en un estado raro (probá mandar otro mensaje desde `scripts/test_ws_chat.py` después de cerrar la app: debería seguir funcionando).
 
 Fuera de alcance de esta fase (no busques esto todavía)
-- [ ] Sin instalador/empaquetado (`tauri build`) — eso es la Fase 8, y ni siquiera existen los íconos todavía (`src-tauri/icons/README.md`).
+- [ ] Sin instalador/empaquetado (`tauri build`) — eso es la Fase 8. Los íconos ya existen como placeholders (un cuadrado azul con una "A") para que `tauri dev` compile en Windows — ver `src-tauri/icons/README.md` sobre por qué hacían falta antes de lo esperado, y por qué falta `icon.icns` (macOS) todavía.
 - [ ] Sin indicador visual de "escuchando activamente vs. en silencio" durante la captura de mic — el botón solo indica on/off, no el estado del VAD en tiempo real.
 
 ### 3.9 Hardening y observabilidad (✔ Fase 7)
@@ -309,18 +313,19 @@ Incluye los unitarios (chunking, sandboxing de tools, registry, VAD, sentence bu
 
 Esto es el capítulo que junta todo: backend completo en WSL2, frontend nativo en Windows, probado como topología real (dos "máquinas" hablándose por red), no como scripts sueltos.
 
-**Mapa de la topología:**
+**Mapa de la topología** (dos checkouts del repo, uno por lado — ver `docs/adr/0008`, adenda 3):
 
 ```
-┌─────────────────────── WSL2 (Ubuntu) ───────────────────────┐
-│  Ollama (nativo, :11434)                                     │
-│  Qdrant (Docker, :6333)                                      │
-│  orchestrator (uvicorn, :8000, bindeado a 0.0.0.0)            │
-└───────────────────────────┬───────────────────────────────────┘
+┌──────────── WSL2 (Ubuntu) — checkout #1 ─────────────┐
+│  Ollama (nativo, :11434)                              │
+│  Qdrant (Docker, :6333)                               │
+│  orchestrator (uvicorn, :8000, bindeado a 0.0.0.0)     │
+└───────────────────────────┬────────────────────────────┘
                              │ WSL2 localhost forwarding
                              │ (0.0.0.0:8000 dentro de WSL2 ≈ localhost:8000 en Windows)
-┌────────────────────────────┴─────────────── Windows ─────────┐
+┌────────────────────────────┴── Windows — checkout #2 ─┐
 │  Tauri app (Next.js + WebView2) → ws://localhost:8000/ws/chat │
+│  (clon separado en NTFS, ej. C:\Users\...\proyectos\...)       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -355,9 +360,9 @@ Invoke-RestMethod http://localhost:8000/health
 ```
 Si esto falla acá, **no tiene sentido seguir con Tauri todavía** — andá directo a la sección de troubleshooting (A) más abajo. Si esto funciona, el 90% del riesgo de la topología cruzada ya está descartado.
 
-**6. Windows — frontend** (el repo vive en WSL2, accedé vía `\\wsl.localhost\`, ver 3.8 y `apps/desktop/README.md`):
+**6. Windows — frontend** (en el clon separado de NTFS nativo, no en `\\wsl.localhost\...` — ver 3.8 y `apps/desktop/README.md`; recordá `git pull` ahí también si cambió algo):
 ```powershell
-cd \\wsl.localhost\Ubuntu\home\tu-usuario\ruta\a\offline-personal-assistance\apps\desktop
+cd C:\Users\tu-usuario\proyectos\offline-personal-assistance\apps\desktop
 npm run tauri dev
 ```
 
@@ -409,22 +414,15 @@ npm run tauri dev
 **(G) `npm install` o `npm run tauri dev` falla compilando la parte de Rust.**
 Además de Node.js y Rust/Cargo (ya mencionados en la Fase 6): en Windows, Tauri necesita el **toolchain de compilación de C++ de Visual Studio** (Visual Studio Installer → workload "Desktop development with C++", o los "Build Tools for Visual Studio" standalone si no querés instalar el IDE completo). Sin esto, la compilación del binario Rust falla con errores de linker (`link.exe not found` o similares) — no es un error de nuestro código, es un prerequisito de la toolchain de Windows para cualquier proyecto Rust/Tauri.
 
-**(H) `cd \\wsl.localhost\...` falla, o `npm install`/`npm run tauri dev` son exageradamente lentos o dan errores raros de permisos ahí.**
-1. Confirmá el nombre exacto de la distro con `wsl -l -v` desde PowerShell — un typo ahí (ej. `Ubuntu-22.04` vs `Ubuntu`) hace que la ruta no exista.
-2. Confirmá que la distro esté corriendo (`wsl -l -v` muestra el estado) — si está `Stopped`, arrancala entrando una vez con `wsl` antes de que Windows pueda resolver la ruta de red.
-3. Si `\\wsl.localhost\<distro>\...` no resuelve en absoluto, probá el alias viejo `\\wsl$\<distro>\...` — en versiones de Windows algo más viejas es el único que funciona.
-4. Lentitud notable en `npm install` (varios minutos) o en la primera compilación de `cargo` es **esperado** trabajando contra la ruta de red (ver la adenda del ADR 0008) — no es un signo de que algo esté mal, es el costo de la decisión de usar un solo checkout.
-5. Si aparecen errores de permisos al escribir archivos (ej. `EPERM`, `EACCES` en `node_modules/` o `target/`), y persisten después de reintentar: es la señal concreta de "esto ya no vale la pena" que menciona la adenda del ADR 0008 — ahí sí conviene migrar a un clon separado en NTFS nativo de Windows en vez de seguir peleando con la ruta de red.
+**(H) `npm run tauri dev` tira `Couldn't recognize the current folder as a Tauri project`, o cualquier otra rareza corriendo el frontend desde `\\wsl.localhost\...`.**
+No lo investigues más — **no se usa esa ruta**, se abandonó de raíz. La causa era estructural: `cmd.exe` en Windows rechaza una ruta UNC como directorio de trabajo de un proceso (lo confirmamos con evidencia directa: el propio `cmd.exe` avisa *"No se permiten rutas UNC. Regresando de manera predeterminada al directorio Windows."* y el proceso hijo hereda `C:\Windows` en vez de `apps\desktop`), y ni mapear una letra de unidad con `net use` ni forzar `script-shell=powershell.exe` en npm lo resolvieron del todo (ver adendas 2 y 3 de `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`).
 
-**(I) `npm run tauri dev` (o `npm run tauri -- --version`) tira `Couldn't recognize the current folder as a Tauri project`, aunque `src-tauri/tauri.conf.json` exista exactamente ahí.**
-No es un problema de Tauri ni del repo — es que `npm` en Windows corre los scripts vía `cmd.exe` por default, y `cmd.exe` **rechaza una ruta UNC como directorio actual**, cayendo en silencio a `C:\Windows` (mirá bien el output completo del comando: `cmd.exe` deja un aviso tipo *"No se permiten rutas UNC. Regresando de manera predeterminada al directorio Windows."*, fácil de pasar por alto entre el resto de la salida). El binario de `tauri` termina heredando `C:\Windows` como directorio, no `apps\desktop` — por eso "no encuentra" el proyecto. Mapear una letra de unidad con `net use` **no soluciona esto** (`\\wsl.localhost\...` no es un recurso SMB real, `net use` no lo mapea como una unidad de red genuina).
-
-Fix ya aplicado en el repo: `apps/desktop/.npmrc` con `script-shell=powershell.exe` (PowerShell sí soporta UNC como directorio actual). Si ya tenés el repo actualizado y sigue pasando, confirmá que ese archivo existe y tiene esa línea — ver la adenda 2 del ADR 0008 para el detalle completo.
+**Si estás viendo este error, es porque estás corriendo desde el checkout equivocado.** El frontend corre desde un **segundo clon del repo en NTFS nativo de Windows** (ej. `C:\Users\...\proyectos\offline-personal-assistance`), no desde `\\wsl.localhost\...` — ver 3.8 más arriba y `apps/desktop/README.md`. Si ya estás en ese clon nativo y el error persiste, ahí sí es otra cosa (revisá que `git clone` haya traído todo bien, `dir src-tauri` para confirmar que `tauri.conf.json` existe en ese clon).
 
 ## 4. Observaciones importantes mientras testeás
 
 - **El frontend (Fase 6) es la única pieza que corre nativo en Windows, a propósito** — el backend sigue 100% en WSL2. No es una contradicción del ADR 0006 (ese ADR habla de no duplicar el *mismo servicio* entre los dos lados, típicamente Ollama); acá son dos procesos distintos hablándose por WebSocket. Ver `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md`.
-- **El código de `apps/desktop` está escrito pero no compilado/corrido todavía en ningún lado** — a diferencia del backend (que se fue probando en cada fase), esto es la primera vez que se toca TypeScript/Rust en el proyecto. Es razonable esperar que `npm install`/`npm run tauri dev` tire algún error de versión de paquete o de configuración de Tauri la primera vez — no asumas que "está mal escrito" antes de ver el error real, pero tampoco asumas que va a andar a la primera después de todo lo que pasó con las dependencias de Python esta sesión.
+- **Corré el frontend desde el clon de NTFS nativo, nunca desde `\\wsl.localhost\...`** — ya se probó esa vía y se abandonó por un problema estructural de Windows (`cmd.exe` rechazando rutas UNC como directorio de proceso), no un bug de nuestro código. Ver la adenda 3 de `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md` y el punto (H) del troubleshooting de 3.11 si volvés a ver ese error.
 - **Sin `packages/shared-contracts/` todavía**: el contrato del protocolo WS está duplicado a mano en `apps/desktop/src/lib/protocol.ts` (TypeScript) y `apps/orchestrator/app/api/ws.py` (comentario Python). Si cambiás el protocolo de un lado, acordate de actualizar el otro.
 - **Todo corre en WSL2 con Ubuntu, sin mezclar con Windows nativo** — esto costó una sesión entera de debugging (`docs/adr/0006-estandarizar-entorno-a-wsl2-ubuntu.md`): tener Ollama instalado tanto nativo en Windows como dentro de WSL2 hace que `localhost:11434` resuelva a dos procesos completamente distintos según desde dónde lo llames, cada uno con sus propios modelos descargados. Un `Invoke-RestMethod` desde PowerShell puede funcionar perfecto mientras el orchestrator (corriendo en WSL2) recibe `model not found` para el mismo modelo — no es contradictorio, son dos servidores distintos. Si algo "funciona en una terminal pero no en otra", lo primero a sospechar es esto, no el código.
 - **Ollama nativo por default, no containerizado**: `docker-compose.yml` solo trae Qdrant + orchestrator; Ollama corre en el host (WSL2) porque ya lo tenías instalado ahí y containerizarlo no suma nada de performance (ni CPU ni GPU — los contenedores Linux son namespaces, no VMs). El override `docker-compose.ollama.yml` existe para quien no tenga Ollama nativo, ver `docker/README.md` — no combinar ambos.

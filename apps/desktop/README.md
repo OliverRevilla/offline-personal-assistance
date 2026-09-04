@@ -8,7 +8,9 @@ Owner: `frontend-engineer`. Ver [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.m
 
 **El proceso** (Node/npm/Tauri) corre **nativo en Windows** — no dentro de WSL2 (a diferencia del backend). El backend sigue viviendo en WSL2 sin cambios; este frontend le habla por WebSocket a `ws://localhost:8000/ws/chat`, que WSL2 expone solo hacia Windows. Ver el ADR 0008 para el porqué.
 
-**Los archivos**, en cambio, siguen viviendo en el filesystem de WSL2 (es el mismo checkout del repo, no uno separado) — el frontend nativo de Windows los accede vía la ruta de red `\\wsl.localhost\<distro>\...` (ver la adenda del ADR 0008 para el trade-off de esta elección vs. clonar el repo también en NTFS nativo). Esto es más lento que trabajar sobre NTFS nativo — es esperable que `npm install`/`cargo build` tarden más de lo que tardarían en Windows puro, no es un signo de que algo esté mal.
+**Los archivos**: el repo está clonado **dos veces** — una en WSL2 (la que usás para el backend) y otra en el filesystem nativo de Windows (NTFS), solo para trabajar acá. No es el mismo checkout accedido por dos lados: se probó eso primero (vía `\\wsl.localhost\<distro>\...`) y se abandonó, porque `cmd.exe` en Windows rechaza estructuralmente una ruta UNC como directorio de trabajo de un proceso — rompía `npm run tauri dev` de una forma que no tenía un fix limpio. Ver las adendas 2 y 3 de `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md` para el detalle completo de por qué se descartó esa vía.
+
+**Esto significa que tenés que mantener sincronizados los dos checkouts**: cualquier cambio que afecte a `apps/desktop`, `docs/ARCHITECTURE.md`, o el protocolo WS, necesita `git pull` en **ambos** lados — el de WSL2 y este clon de Windows. No asumas que actualizar uno actualiza el otro.
 
 ## Requisitos (en Windows, no en WSL2)
 
@@ -20,31 +22,30 @@ Owner: `frontend-engineer`. Ver [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.m
 
 ## Cómo correr
 
-Primero encontrá la ruta de red a tu repo (desde PowerShell, para saber el nombre exacto de tu distro):
+**Primera vez — cloná el repo también en Windows nativo** (desde PowerShell, en una carpeta cualquiera de tu NTFS):
 
 ```powershell
-wsl -l -v
+cd C:\Users\<tu-usuario>\proyectos    # o donde prefieras, en un disco/carpeta nativa de Windows
+git clone \\wsl.localhost\Ubuntu\home\<tu-usuario>\ruta\a\offline-personal-assistance offline-personal-assistance
 ```
 
-Y desde dentro de WSL2, la ruta absoluta del repo (`pwd` parado en la raíz del repo). Combinás ambas cosas en `\\wsl.localhost\<DistroName>\<ruta-absoluta-de-pwd>`. Por ejemplo, si `wsl -l -v` dice `Ubuntu` y `pwd` dice `/home/tu-usuario/proyectos/offline-personal-assistance`:
+(Ajustá la distro y la ruta de origen a la tuya — `wsl -l -v` te confirma el nombre exacto de la distro. Si tenés el repo también en un remoto tipo GitHub, clonar desde ahí en vez de desde la ruta de WSL2 funciona igual de bien.)
+
+Desde ahí en adelante, todo el trabajo de frontend es en este clon de Windows — **no** en la ruta `\\wsl.localhost\...`:
 
 ```powershell
-cd \\wsl.localhost\Ubuntu\home\tu-usuario\proyectos\offline-personal-assistance\apps\desktop
+cd C:\Users\<tu-usuario>\proyectos\offline-personal-assistance\apps\desktop
 npm install
 copy .env.local.example .env.local
 npm run tauri dev
 ```
 
-(Si tu Windows es más viejo y `\\wsl.localhost\` no resuelve, probá `\\wsl$\` en su lugar — es el alias anterior, debería apuntar a lo mismo.)
+Esto levanta `next dev` (vía `beforeDevCommand` en `tauri.conf.json`) y abre la ventana de Tauri apuntando a `http://localhost:3000`. Requiere que el backend (`apps/orchestrator`, en WSL2, en el *otro* checkout) ya esté corriendo — ver la raíz de `GUIDE.md`.
 
-**Nota sobre `.npmrc`**: este directorio incluye un `.npmrc` con `script-shell=powershell.exe` — sin eso, `npm run tauri dev` falla con `Couldn't recognize the current folder as a Tauri project` porque `npm` en Windows corre los scripts vía `cmd.exe` por default, y `cmd.exe` rechaza una ruta UNC como directorio actual (cae a `C:\Windows` en silencio). Ver la adenda 2 de `docs/adr/0008-frontend-nativo-windows-y-stack-tauri.md` para el detalle completo — ya está resuelto en el repo, no hace falta que hagas nada extra, pero si alguna vez ves ese error de nuevo, es lo primero a revisar.
-
-**Si el hot-reload de `next dev` no detecta tus cambios** (guardás un archivo y la ventana no se actualiza sola): es un síntoma conocido del file-watching nativo de Windows cruzando al filesystem de WSL2 por la ruta de red. Como workaround, parar y volver a correr `npm run tauri dev` después de cada cambio suele alcanzar mientras se prueba esto; si se vuelve molesto de verdad, ese es el momento de reconsiderar el clon separado en NTFS nativo (ver la adenda del ADR 0008), no antes.
-
-Esto levanta `next dev` (vía `beforeDevCommand` en `tauri.conf.json`) y abre la ventana de Tauri apuntando a `http://localhost:3000`. Requiere que el backend (`apps/orchestrator`, en WSL2) ya esté corriendo — ver la raíz de `GUIDE.md`.
+**Cada vez que cambie algo en `apps/desktop` (o en el protocolo WS)**: `git pull` en este clon de Windows también, no solo en el de WSL2 — son dos checkouts independientes ahora (ver "Dónde corre esto" arriba).
 
 ## Estado actual (Fase 7 del roadmap)
 
 Todo lo de las fases 1-5 (texto, RAG, tool calling con confirmación, voz de entrada y salida) con una UI real: conversación en pantalla, botón de micrófono, reproducción de audio, y la barra de confirmación para operaciones destructivas (`actualizar_nota`). El cliente WS (`src/lib/ws-client.ts`) reconecta solo con backoff exponencial si se cae la conexión, y avisa en la UI que el contexto de la conversación anterior se perdió.
 
-No incluye todavía: empaquetado/instalador (Fase 8 — íconos de la app tampoco existen aún, ver `src-tauri/icons/README.md`), ni ningún comando Rust custom (no hace falta ninguno para esta fase).
+No incluye todavía: empaquetado/instalador real (Fase 8 — los íconos actuales son placeholders generados a mano, ver `src-tauri/icons/README.md`; resultaron necesarios para `tauri dev` en Windows, no solo para `tauri build` como se había asumido primero), ni ningún comando Rust custom (no hace falta ninguno para esta fase).
