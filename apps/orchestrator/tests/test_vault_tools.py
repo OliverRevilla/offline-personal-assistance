@@ -49,6 +49,17 @@ def test_eliminar_tarea_borra_la_linea_pendiente(monkeypatch, tmp_path) -> None:
     assert "llamar al dentista" in contenido
 
 
+def test_eliminar_tarea_acepta_el_titulo_limpio_de_una_tarea_calendarizada(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.tools.vault_tools.settings.vault_path", str(tmp_path))
+    nota = tmp_path / "tareas.md"
+    nota.write_text("- [ ] Preparar demo 🛫 2026-09-14 📅 2026-09-20\n", encoding="utf-8")
+
+    resultado = asyncio.run(eliminar_tarea({"ruta": "tareas.md", "texto": "Preparar demo"}, None))
+
+    assert resultado["ok"] is True
+    assert nota.read_text(encoding="utf-8") == ""
+
+
 def test_eliminar_tarea_hace_backup_del_archivo_antes_de_borrar(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("app.tools.vault_tools.settings.vault_path", str(tmp_path))
     nota = tmp_path / "tareas.md"

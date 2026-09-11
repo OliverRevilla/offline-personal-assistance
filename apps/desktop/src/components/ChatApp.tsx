@@ -5,7 +5,7 @@ import { AudioCapture } from "@/lib/audio-capture";
 import { AudioPlayback } from "@/lib/audio-playback";
 import { DashboardTareasMessage, ServerMessage } from "@/lib/protocol";
 import { WsClient } from "@/lib/ws-client";
-import { TaskDashboard } from "@/components/TaskDashboard";
+import { TaskDashboard } from "@/components/dashboards/tasks/TaskDashboard";
 
 interface Message {
   id: string;

@@ -139,7 +139,11 @@ async def eliminar_tarea(argumentos: dict, qdrant_client) -> dict:
         match = TASK_RE.match(linea)
         if not match or match.group(1).lower() == "x":
             continue
-        if match.group(2).strip() == texto:
+        texto_tarea = match.group(2).strip()
+        titulo_tarea = TASK_METADATA_RE.sub("", texto_tarea).strip()
+        # El dashboard muestra el título limpio; aceptar también ese título facilita que el
+        # usuario pueda eliminar una tarea calendarizada por voz sin repetir los emojis de fecha.
+        if texto_tarea == texto or titulo_tarea == texto:
             indice_objetivo = i
             break
 
