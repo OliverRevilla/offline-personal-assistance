@@ -15,6 +15,7 @@ TOOL_EXECUTORS: dict[str, ToolExecutor] = {
     "crear_nota": vault_tools.crear_nota,
     "actualizar_nota": vault_tools.actualizar_nota,
     "listar_tareas": vault_tools.listar_tareas,
+    "mostrar_dashboard_tareas": vault_tools.mostrar_dashboard_tareas,
     "eliminar_tarea": vault_tools.eliminar_tarea,
 }
 

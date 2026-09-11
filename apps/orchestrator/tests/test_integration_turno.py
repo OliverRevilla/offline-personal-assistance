@@ -267,7 +267,49 @@ def test_turno_con_tool_calling(client, monkeypatch):
         assert ws.receive_json() == {"tipo": "token", "texto": "Listo."}
 
         ws.receive_bytes()  # audio de "Listo."
+    assert ws.receive_json()["tipo"] == "turn_end"
+
+
+def test_tool_dashboard_envia_evento_tipado_al_cliente(client, monkeypatch):
+    calls = {"n": 0}
+    dashboard = {
+        "fecha_referencia": "2026-09-11",
+        "tareas": [],
+        "resumen": {"total": 0, "pendientes": 0, "completadas": 0, "vencidas": 0, "sin_fecha": 0},
+    }
+
+    async def fake_stream_chat(messages, tools=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            yield {"type": "tool_calls", "calls": [{"function": {"name": "mostrar_dashboard_tareas", "arguments": {}}}]}
+        else:
+            yield {"type": "token", "content": "Abrí tu dashboard."}
+
+    async def fake_run_tool(nombre, argumentos, qdrant_client):
+        assert nombre == "mostrar_dashboard_tareas"
+        return dashboard
+
+    monkeypatch.setattr(ws_module, "stream_chat", fake_stream_chat)
+    monkeypatch.setattr(ws_module, "run_tool", fake_run_tool)
+    monkeypatch.setattr(ws_module, "es_solicitud_dashboard", lambda texto: False)
+
+    with client.websocket_connect("/ws/chat") as ws:
+        ws.receive_json()  # audio_meta
+        consumir_saludo(ws)
+        ws.send_json({"tipo": "user_message", "texto": "Permitíme ver el dashboard de tareas"})
+
+        assert ws.receive_json()["tipo"] == "turn_start"
+        assert ws.receive_json() == {"tipo": "tool_call", "nombre": "mostrar_dashboard_tareas", "argumentos": {}}
+        assert ws.receive_json() == {"tipo": "tool_result", "nombre": "mostrar_dashboard_tareas", "resultado": dashboard}
+        assert ws.receive_json() == {"tipo": "dashboard_tareas", **dashboard}
+        assert ws.receive_json() == {"tipo": "token", "texto": "Abrí tu dashboard."}
+        ws.receive_bytes()
         assert ws.receive_json()["tipo"] == "turn_end"
+
+
+def test_dashboard_intencion_tolera_errores_de_transcripcion():
+    assert ws_module.es_solicitud_dashboard("Dahboard de atreas") is True
+    assert ws_module.es_solicitud_dashboard("no quiero abrir el dashboard") is False
 
 
 def test_confirmacion_aprobada_ejecuta_la_tool(client, monkeypatch):

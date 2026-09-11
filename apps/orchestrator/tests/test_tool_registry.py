@@ -12,3 +12,4 @@ def test_actualizar_nota_y_eliminar_tarea_son_las_unicas_destructivas() -> None:
     assert is_destructive("crear_nota") is False
     assert is_destructive("buscar_nota") is False
     assert is_destructive("listar_tareas") is False
+    assert is_destructive("mostrar_dashboard_tareas") is False

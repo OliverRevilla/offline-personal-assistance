@@ -1,8 +1,9 @@
 import asyncio
+from datetime import date
 
 import pytest
 
-from app.tools.vault_tools import eliminar_tarea, resolve_vault_path
+from app.tools.vault_tools import eliminar_tarea, mostrar_dashboard_tareas, resolve_vault_path, task_dashboard_item
 
 
 def test_resolve_vault_path_allows_paths_inside_vault(monkeypatch, tmp_path) -> None:
@@ -89,3 +90,41 @@ def test_eliminar_tarea_con_ruta_inexistente_devuelve_error(monkeypatch, tmp_pat
     resultado = asyncio.run(eliminar_tarea({"ruta": "no-existe.md", "texto": "comprar pan"}, None))
 
     assert "error" in resultado
+
+
+def test_dashboard_extrae_fechas_y_estado_desde_la_tarea() -> None:
+    tarea = task_dashboard_item(
+        "proyectos/demo.md",
+        7,
+        "Preparar demo 🛫 2026-09-14 📅 2026-09-20",
+        False,
+        date(2026, 9, 11),
+    )
+
+    assert tarea["titulo"] == "Preparar demo"
+    assert tarea["fecha_inicio"] == "2026-09-14"
+    assert tarea["fecha_fin"] == "2026-09-20"
+    assert tarea["estado"] == "programada"
+    assert tarea["progreso"] == 0
+
+
+def test_dashboard_usa_vencimiento_como_hito_y_no_inventa_duracion() -> None:
+    tarea = task_dashboard_item("tareas.md", 2, "Pagar servicio 📅 2026-09-10", False, date(2026, 9, 11))
+
+    assert tarea["fecha_inicio"] == "2026-09-10"
+    assert tarea["fecha_fin"] == "2026-09-10"
+    assert tarea["estado"] == "vencida"
+
+
+def test_mostrar_dashboard_reune_tareas_calendarizadas_y_sin_fecha(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("app.tools.vault_tools.settings.vault_path", str(tmp_path))
+    (tmp_path / "plan.md").write_text(
+        "- [ ] Definir alcance 🛫 2026-09-14 📅 2026-09-18\n- [x] Crear borrador\n", encoding="utf-8"
+    )
+
+    resultado = asyncio.run(mostrar_dashboard_tareas({}, None))
+
+    assert resultado["resumen"]["total"] == 2
+    assert resultado["resumen"]["pendientes"] == 1
+    assert resultado["tareas"][0]["titulo"] == "Definir alcance"
+    assert resultado["tareas"][1]["estado"] == "completada"

@@ -8,6 +8,7 @@ llamar de forma uniforme.
 import json
 import re
 import time
+from datetime import date
 from pathlib import Path
 
 from app.core.config import settings
@@ -16,6 +17,15 @@ from app.rag.retriever import retrieve
 
 RESERVED_DIR = ".asistente"  # carpeta interna: audit log + backups, nunca destino de una tool
 TASK_RE = re.compile(r"^\s*-\s*\[( |x|X)\]\s*(.+)$")
+DATE_VALUE_RE = r"(\d{4}-\d{2}-\d{2})"
+# Sintaxis de Obsidian Tasks, más aliases legibles para que el agente pueda escribirlos al
+# crear o editar una nota. Ej.: `- [ ] Preparar demo 🛫 2026-09-14 📅 2026-09-20`.
+TASK_START_RE = re.compile(rf"(?:🛫|inicio\s*::?|start\s*::?)\s*{DATE_VALUE_RE}", re.IGNORECASE)
+TASK_END_RE = re.compile(rf"(?:📅|🏁|fecha[_\s-]*l[ií]mite\s*::?|fin\s*::?|due\s*::?)\s*{DATE_VALUE_RE}", re.IGNORECASE)
+TASK_METADATA_RE = re.compile(
+    rf"\s*(?:🛫|inicio\s*::?|start\s*::?|📅|🏁|fecha[_\s-]*l[ií]mite\s*::?|fin\s*::?|due\s*::?)\s*{DATE_VALUE_RE}",
+    re.IGNORECASE,
+)
 
 
 def vault_root() -> Path:
@@ -162,3 +172,82 @@ async def listar_tareas(argumentos: dict, qdrant_client) -> dict:
             tareas.append({"ruta": relpath, "texto": match.group(2).strip(), "hecha": hecha})
 
     return {"tareas": tareas}
+
+
+def parse_task_date(match: re.Match[str] | None) -> date | None:
+    """Devuelve una fecha válida; un texto que parece fecha pero es inválido queda sin calendarizar."""
+    if match is None:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
+
+
+def task_dashboard_item(relpath: str, line_number: int, text: str, hecha: bool, today: date) -> dict:
+    start_date = parse_task_date(TASK_START_RE.search(text))
+    end_date = parse_task_date(TASK_END_RE.search(text))
+    alerts: list[str] = []
+
+    # Una fecha de vencimiento sin inicio es un hito de un día; así entra al Gantt sin
+    # inventar duración. Si solo hay inicio, se muestra también como hito hasta que se defina fin.
+    if start_date is None and end_date is not None:
+        start_date = end_date
+    elif start_date is not None and end_date is None:
+        end_date = start_date
+    elif start_date is not None and end_date is not None and start_date > end_date:
+        alerts.append("La fecha de inicio es posterior a la fecha de vencimiento.")
+
+    if hecha:
+        status = "completada"
+    elif end_date is None:
+        status = "sin_fecha"
+    elif end_date < today:
+        status = "vencida"
+    elif end_date == today:
+        status = "hoy"
+    else:
+        status = "programada"
+
+    title = TASK_METADATA_RE.sub("", text).strip() or text
+    return {
+        "id": f"{relpath}:{line_number}",
+        "ruta": relpath,
+        "texto": text,
+        "titulo": title,
+        "hecha": hecha,
+        "progreso": 100 if hecha else 0,
+        "fecha_inicio": start_date.isoformat() if start_date else None,
+        "fecha_fin": end_date.isoformat() if end_date else None,
+        "estado": status,
+        "alertas": alerts,
+    }
+
+
+async def mostrar_dashboard_tareas(argumentos: dict, qdrant_client) -> dict:
+    """Construye los datos del dashboard desde tareas Markdown, sin modificar el vault."""
+    today = date.today()
+    root = vault_root()
+    tareas: list[dict] = []
+
+    for md_file in iter_markdown_files(root):
+        relpath = md_file.relative_to(root).as_posix()
+        for line_number, line in enumerate(md_file.read_text(encoding="utf-8").splitlines(), start=1):
+            match = TASK_RE.match(line)
+            if not match:
+                continue
+            tareas.append(task_dashboard_item(relpath, line_number, match.group(2).strip(), match.group(1).lower() == "x", today))
+
+    tareas.sort(key=lambda task: (task["fecha_fin"] is None, task["fecha_fin"] or "9999-12-31", task["ruta"], task["id"]))
+    pendientes = [task for task in tareas if not task["hecha"]]
+    return {
+        "fecha_referencia": today.isoformat(),
+        "tareas": tareas,
+        "resumen": {
+            "total": len(tareas),
+            "pendientes": len(pendientes),
+            "completadas": len(tareas) - len(pendientes),
+            "vencidas": sum(task["estado"] == "vencida" for task in pendientes),
+            "sin_fecha": sum(task["estado"] == "sin_fecha" for task in pendientes),
+        },
+    }

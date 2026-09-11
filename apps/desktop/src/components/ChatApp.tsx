@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioCapture } from "@/lib/audio-capture";
 import { AudioPlayback } from "@/lib/audio-playback";
-import { ServerMessage } from "@/lib/protocol";
+import { DashboardTareasMessage, ServerMessage } from "@/lib/protocol";
 import { WsClient } from "@/lib/ws-client";
+import { TaskDashboard } from "@/components/TaskDashboard";
 
 interface Message {
   id: string;
@@ -51,6 +52,7 @@ export function ChatApp() {
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+  const [taskDashboard, setTaskDashboard] = useState<DashboardTareasMessage | null>(null);
 
   const wsRef = useRef<WsClient | null>(null);
   const playbackRef = useRef<AudioPlayback | null>(null);
@@ -98,9 +100,13 @@ export function ChatApp() {
     if (capture.isActive) return;
 
     try {
-      await capture.start(onMicFrame);
-      setMicActive(true);
-      setInputMode("voz");
+      const started = await capture.start(onMicFrame);
+      // El efecto de React pudo haberse limpiado mientras el navegador pedía permisos o
+      // cargaba el AudioWorklet. En ese caso no hay una captura real que reflejar en la UI.
+      if (started) {
+        setMicActive(true);
+        setInputMode("voz");
+      }
     } catch (err) {
       setInputMode("teclado");
       appendMessage({
@@ -159,18 +165,22 @@ export function ChatApp() {
             currentAssistantTextRef.current += msg.texto;
             break;
           case "tool_call":
+            if (msg.nombre !== "mostrar_dashboard_tareas") {
             appendMessage({
               id: nuevoId(),
               role: "system",
               text: `🔧 ${msg.nombre}(${JSON.stringify(msg.argumentos)})`,
             });
+            }
             break;
           case "tool_result":
+            if (msg.nombre !== "mostrar_dashboard_tareas") {
             appendMessage({
               id: nuevoId(),
               role: "system",
               text: `→ ${msg.nombre}: ${JSON.stringify(msg.resultado)}`,
             });
+            }
             break;
           case "confirmacion_requerida":
             setPendingConfirmation({ id: msg.id, nombre: msg.nombre, argumentos: msg.argumentos });
@@ -190,6 +200,9 @@ export function ChatApp() {
               setMicActive(false);
               setInputMode("teclado");
             }
+            break;
+          case "dashboard_tareas":
+            setTaskDashboard(msg);
             break;
           case "error":
             appendMessage({ id: nuevoId(), role: "error", text: msg.mensaje });
@@ -273,9 +286,31 @@ export function ChatApp() {
 
   return (
     <div className="app">
-      <div className="assistant-indicator">
-        <div ref={ballRef} className={`assistant-ball ball-${ballState}`} />
-        <span>{BALL_LABELS[ballState]}</span>
+      <div className="assistant-indicator" aria-live="polite">
+        <div
+          ref={ballRef}
+          className={`assistant-ball ball-${ballState}`}
+          role="img"
+          aria-label={`Estado del asistente: ${BALL_LABELS[ballState]}`}
+        >
+          <span className="assistant-ball-halo" />
+          <span className="assistant-ball-orbit assistant-ball-orbit-one" />
+          <span className="assistant-ball-orbit assistant-ball-orbit-two" />
+          <span className="assistant-ball-core" />
+          <div className="audio-bars" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+        <div className="assistant-status">
+          <span className="assistant-status-kicker">ASISTENTE OFFLINE</span>
+          <span className="assistant-status-label">{BALL_LABELS[ballState]}</span>
+        </div>
       </div>
 
       <div className="messages">
@@ -290,7 +325,9 @@ export function ChatApp() {
       {pendingConfirmation && (
         <div className="confirmation-bar">
           <span>
-            Confirmar {pendingConfirmation.nombre}({JSON.stringify(pendingConfirmation.argumentos)})?
+            {pendingConfirmation.nombre === "mostrar_dashboard_tareas"
+              ? "¿Querés abrir el dashboard nativo de tareas?"
+              : `Confirmar ${pendingConfirmation.nombre}(${JSON.stringify(pendingConfirmation.argumentos)})?`}
           </span>
           <button className="approve" onClick={() => responderConfirmacion(true)}>
             Aprobar
@@ -300,6 +337,8 @@ export function ChatApp() {
           </button>
         </div>
       )}
+
+      {taskDashboard && <TaskDashboard dashboard={taskDashboard} onClose={() => setTaskDashboard(null)} />}
 
       <div className="input-bar">
         <button

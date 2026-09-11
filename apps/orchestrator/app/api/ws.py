@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -32,6 +33,7 @@ router = APIRouter()
 #                        {"tipo": "tool_call", "nombre": str, "argumentos": dict}
 #                        {"tipo": "confirmacion_requerida", "id": str, "nombre": str, "argumentos": dict}
 #                        {"tipo": "tool_result", "nombre": str, "resultado": dict}
+#                        {"tipo": "dashboard_tareas", "fecha_referencia": str, "tareas": list, "resumen": dict}
 #                        {"tipo": "turn_end"}
 #                        {"tipo": "modo_entrada", "modo": "teclado"}  (el server detectó la frase de salida de voz)
 #                        {"tipo": "error", "mensaje": str}
@@ -59,6 +61,40 @@ MODO_TECLADO_RE = re.compile(
     re.IGNORECASE,
 )
 MODO_TECLADO_CONFIRMACION_TEXT = "Listo, ahora todo por teclado."
+
+
+def _normalizar_intencion(texto: str) -> str:
+    sin_acentos = "".join(
+        caracter for caracter in unicodedata.normalize("NFKD", texto.casefold()) if not unicodedata.combining(caracter)
+    )
+    return sin_acentos
+
+
+def _token_parecido(token: str, candidatos: tuple[str, ...]) -> bool:
+    """Tolera errores pequeños típicos de STT (ej. `dahboard` y `atreas`)."""
+    if len(token) < 5:
+        return False
+    for candidato in candidatos:
+        if token == candidato:
+            return True
+        # Distancia de Levenshtein acotada: evita depender del LLM para una orden de UI.
+        anterior = list(range(len(candidato) + 1))
+        for indice, caracter in enumerate(token, start=1):
+            actual = [indice]
+            for columna, esperado in enumerate(candidato, start=1):
+                actual.append(min(actual[-1] + 1, anterior[columna] + 1, anterior[columna - 1] + (caracter != esperado)))
+            anterior = actual
+        if anterior[-1] <= 2:
+            return True
+    return False
+
+
+def es_solicitud_dashboard(texto: str) -> bool:
+    normalizado = _normalizar_intencion(texto)
+    tokens = re.findall(r"[a-z0-9]+", normalizado)
+    if any(token in {"no", "nunca", "cancelar", "cancela", "cierra"} for token in tokens):
+        return False
+    return any(_token_parecido(token, ("dashboard",)) for token in tokens)
 
 
 async def pedir_confirmacion(websocket: WebSocket, nombre: str, argumentos: dict) -> bool:
@@ -150,6 +186,45 @@ async def hablar_texto_directo(websocket: WebSocket, texto: str, preferencias: d
     await websocket.send_json({"tipo": "turn_end"})
 
 
+async def procesar_solicitud_dashboard(
+    websocket: WebSocket, history: list[dict], texto: str, preferencias: dict
+) -> None:
+    """Abre el dashboard tras confirmación, incluso si el STT/LLM no reconoce la tool."""
+    await websocket.send_json({"tipo": "turn_start"})
+    voz_habilitada = preferencias.get("voz_salida", True)
+    audio_queue: asyncio.Queue[str | None] = asyncio.Queue()
+    tts_task = asyncio.create_task(hablar_oraciones(websocket, audio_queue))
+    respuesta = ""
+
+    try:
+        argumentos: dict = {}
+        await websocket.send_json({"tipo": "tool_call", "nombre": "mostrar_dashboard_tareas", "argumentos": argumentos})
+        aprobado = await pedir_confirmacion(websocket, "mostrar_dashboard_tareas", argumentos)
+        if aprobado:
+            resultado = await run_tool("mostrar_dashboard_tareas", argumentos, websocket.app.state.qdrant)
+            await websocket.send_json({"tipo": "tool_result", "nombre": "mostrar_dashboard_tareas", "resultado": resultado})
+            if "error" not in resultado:
+                await websocket.send_json({"tipo": "dashboard_tareas", **resultado})
+                respuesta = "Listo, abrí tu dashboard nativo de tareas."
+            else:
+                respuesta = f"No pude abrir el dashboard: {resultado['error']}"
+        else:
+            resultado = {"error": "El usuario no confirmó la apertura del dashboard."}
+            await websocket.send_json({"tipo": "tool_result", "nombre": "mostrar_dashboard_tareas", "resultado": resultado})
+            respuesta = "De acuerdo, no abrí el dashboard."
+
+        await websocket.send_json({"tipo": "token", "texto": respuesta})
+        if voz_habilitada:
+            await audio_queue.put(respuesta)
+    finally:
+        await audio_queue.put(None)
+        await tts_task
+
+    history.append({"role": "user", "content": texto})
+    history.append({"role": "assistant", "content": respuesta})
+    await websocket.send_json({"tipo": "turn_end"})
+
+
 async def procesar_turno(websocket: WebSocket, history: list[dict], texto: str, preferencias: dict) -> None:
     """Ejecuta un turno completo (RAG + LLM + tool calling + TTS) y actualiza `history` in-place.
 
@@ -160,6 +235,10 @@ async def procesar_turno(websocket: WebSocket, history: list[dict], texto: str, 
     cliente desactivó la voz de salida, ni se encola ni se sintetiza audio para este turno
     (no es solo "no reproducir del lado del cliente": el server no gasta CPU en Piper).
     """
+    if es_solicitud_dashboard(texto):
+        await procesar_solicitud_dashboard(websocket, history, texto, preferencias)
+        return
+
     messages = list(history)
     try:
         resultados = await retrieve(websocket.app.state.qdrant, texto)
@@ -223,6 +302,8 @@ async def procesar_turno(websocket: WebSocket, history: list[dict], texto: str, 
                         resultado = await run_tool(nombre, argumentos, websocket.app.state.qdrant)
 
                     await websocket.send_json({"tipo": "tool_result", "nombre": nombre, "resultado": resultado})
+                    if nombre == "mostrar_dashboard_tareas" and "error" not in resultado:
+                        await websocket.send_json({"tipo": "dashboard_tareas", **resultado})
                     messages.append({"role": "tool", "content": json.dumps(resultado, ensure_ascii=False)})
             else:
                 logger.warning("Se alcanzó MAX_TOOL_ITERATIONS (%d) sin una respuesta final", MAX_TOOL_ITERATIONS)

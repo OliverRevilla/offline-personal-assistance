@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "mostrar_dashboard_tareas",
+    "description": "Muestra en la aplicación un dashboard de tareas con resumen, estados y diagrama de Gantt. Usala cuando el usuario pida ver, abrir o consultar su dashboard/panel/calendario de tareas, por ejemplo: 'Permitíme ver el dashboard de tareas'. No modifica ninguna nota.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
+}
