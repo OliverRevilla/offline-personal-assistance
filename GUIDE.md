@@ -7,7 +7,7 @@
 | 0 — Bootstrap & Infra | ✅ | `docker-compose` (Qdrant + orchestrator; Ollama nativo por default, ver `docker/README.md`), scripts de setup |
 | 1 — Backend esqueleto + chat de texto | ✅ | FastAPI + WS, streaming de Ollama |
 | 2 — RAG sobre el vault | ✅ | Qdrant + `nomic-embed-text`, indexado manual, citación de notas |
-| 3 — Tool calling | ✅ | `buscar_nota`, `crear_nota`, `actualizar_nota` (con confirmación), `listar_tareas` |
+| 3 — Tool calling | ✅ | `buscar_nota`, `crear_nota`, `actualizar_nota` (con confirmación), `listar_tareas`, `eliminar_tarea` (con confirmación) |
 | 4 — STT (oídos) | ✅ (probado, "medianamente correcto" — precisión anotada como mejora futura) | webrtcvad + faster-whisper (CPU), transcripción alimenta el mismo pipeline de texto |
 | 5 — TTS (boca) | 🔧 implementado, falta que lo pruebes | Piper-TTS (subproceso CLI), sentence-buffering, audio incremental por WS |
 | 6 — Frontend Tauri + Next.js | 🔧 implementado, falta que lo pruebes | Tauri nativo en Windows + Next.js estático, WS + AudioWorklet |
@@ -117,9 +117,24 @@ Seguí en la misma sesión de `test_ws_chat.py`:
    - Si aprobás: se sobrescribe y queda un backup en `vault/.asistente/backups/`.
    - Si rechazás: el archivo no cambia y el asistente te lo cuenta en su respuesta.
 3. Pedile que liste tareas pendientes ("¿qué tareas tengo pendientes?") → invoca `listar_tareas`, que lee cualquier `- [ ]`/`- [x]` de las notas del vault (si el vault de prueba no tiene ninguna todavía, agregá una a mano en `notas-de-prueba.md` antes de probar esto).
-4. Revisá `vault/.asistente/audit.jsonl` — debería tener una línea por cada `crear_nota`/`actualizar_nota` que ejecutaste en los pasos 1 y 2.
+4. Pedile que borre una de esas tareas pendientes ("borrame la tarea de comprar pan") → invoca `eliminar_tarea`, que también pide confirmación (`s`/`n`) antes de tocar el archivo. Probá también pedirle que borre una tarea que ya está marcada como hecha (`- [x]`) — debería contestar que no la encontró, no borrarla igual (ver "Catálogo de tools" más abajo).
+5. Revisá `vault/.asistente/audit.jsonl` — debería tener una línea por cada `crear_nota`/`actualizar_nota`/`eliminar_tarea` que ejecutaste en los pasos anteriores.
 
-**✔ Fase 3 si:** el paso 2 efectivamente te pidió confirmación antes de tocar el archivo (no lo hizo directo), y el audit log tiene las entradas esperadas.
+**✔ Fase 3 si:** los pasos 2 y 4 efectivamente te pidieron confirmación antes de tocar el archivo (no lo hicieron directo), y el audit log tiene las entradas esperadas.
+
+#### Catálogo de tools disponibles
+
+El LLM decide solo cuál invocar según lo que le pidas en lenguaje natural — no hace falta (ni sirve) nombrar la tool textualmente, alcanza con pedir la acción.
+
+| Tool | Qué hace | Ejemplo de frase | ¿Pide confirmación? |
+|---|---|---|---|
+| `buscar_nota` | Busca semánticamente en el vault (RAG) y devuelve fragmentos relevantes. | *"¿Qué dice mi nota sobre el proyecto X?"* | No — es de solo lectura. |
+| `crear_nota` | Crea una nota nueva. Falla si la ruta ya existe (no pisa contenido). | *"Creame una nota en ideas/viaje.md con..."* | No — no sobrescribe nada. |
+| `actualizar_nota` | Sobrescribe el contenido completo de una nota existente. Guarda el contenido previo en `vault/.asistente/backups/`. | *"Cambiá la nota de compras para que diga..."* | **Sí.** |
+| `listar_tareas` | Lista los checkboxes de markdown (`- [ ]`/`- [x]`) de todo el vault, con la nota donde aparece cada uno. Podés pedir solo las pendientes. | *"¿Qué tareas tengo pendientes?"* | No — es de solo lectura. |
+| `eliminar_tarea` | Borra una línea de tarea **pendiente** (`- [ ]`) de una nota. Identifica la tarea por el texto exacto (no tiene un id propio) — si el texto no matchea ninguna pendiente, o matchea una ya marcada como hecha, devuelve error en vez de borrar algo distinto. Guarda backup del archivo igual que `actualizar_nota`. | *"Borrá la tarea de llamar al dentista"* | **Sí.** |
+
+Notas sobre `eliminar_tarea`: si tenés dos tareas pendientes con el mismo texto exacto en la misma nota, borra la primera que encuentra — si eso te importa, distinguilas con texto distinto. Y si le pedís borrar una tarea ya completada (`- [x]`), el asistente te va a decir que no la encontró — es a propósito (ver `docs/ARCHITECTURE.md`, sección 3.2), no un bug.
 
 ### 3.6 STT por micrófono (✔ Fase 4)
 
@@ -431,8 +446,8 @@ No lo investigues más — **no se usa esa ruta**, se abandonó de raíz. La cau
 - **El reindexado RAG es manual y completo**, no incremental ni automático (no hay watcher de archivos). El tool calling sí opera sobre el archivo real al instante; es solo la búsqueda semántica automática la que queda desactualizada hasta el próximo `python -m app.rag.indexer`.
 - **`VAULT_PATH` apunta al vault de prueba del repo por default** (`../../vault` desde `apps/orchestrator`). Para tu vault real de Obsidian, cambiá `VAULT_PATH` en tu `.env` local a la ruta absoluta real — y no la commitees, `.env` ya está en `.gitignore`.
 - **Si corrés el orchestrator vía Docker**: el `docker-compose.yml` monta `../vault` como `/vault` **en lectura/escritura** (desde la Fase 3 el asistente necesita poder crear/editar notas ahí). Para tu vault real, un `docker-compose.override.yml` local (no versionado) sobreescribiendo ese volumen.
-- **Sandboxing de las tools**: `crear_nota`/`actualizar_nota` no pueden escribir fuera del vault (path traversal bloqueado) ni dentro de `vault/.asistente/` (reservado para el audit log y los backups). Un error de "ruta fuera del vault" o "ruta reservada" es este chequeo funcionando, no un bug.
-- **La confirmación de `actualizar_nota` es síncrona**: mientras el servidor espera tu `s`/`n`, ese turno de WS queda bloqueado. Documentado en `docs/adr/0002-confirmacion-sincrona-para-tools-destructivas.md` — limitación conocida, no algo para "arreglar" sin pensar el trade-off primero.
+- **Sandboxing de las tools**: `crear_nota`/`actualizar_nota`/`eliminar_tarea` no pueden escribir fuera del vault (path traversal bloqueado) ni dentro de `vault/.asistente/` (reservado para el audit log y los backups). Un error de "ruta fuera del vault" o "ruta reservada" es este chequeo funcionando, no un bug.
+- **La confirmación de `actualizar_nota`/`eliminar_tarea` es síncrona**: mientras el servidor espera tu `s`/`n`, ese turno de WS queda bloqueado. Documentado en `docs/adr/0002-confirmacion-sincrona-para-tools-destructivas.md` — limitación conocida, no algo para "arreglar" sin pensar el trade-off primero.
 - **Presupuesto de VRAM (8GB)**: solo el LLM usa GPU sostenida; STT/TTS (fases 4-5) y los embeddings corren en CPU. No muevas nada a GPU sin pasar por un ADR.
 - **VAD es webrtcvad, no Silero** (que era lo pedido originalmente): se cambió a propósito para no meter `torch` como dependencia — te pregunté antes de decidirlo, ver `docs/adr/0003-webrtcvad-en-vez-de-silero-vad.md`. Si en la práctica el reconocimiento de "cuándo empezaste/terminaste de hablar" anda mal (mucho ruido de fondo, etc.), ese ADR es el lugar para reabrir la decisión con evidencia real, no antes.
 - **El modelo de whisper se descarga la primera vez que arranca el servidor** (necesita red esa vez; después queda cacheado y corre offline) — mismo patrón que `ollama pull` para el LLM, no es una excepción al diseño offline, es el costo de setup inicial.

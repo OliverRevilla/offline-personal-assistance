@@ -15,11 +15,12 @@ TOOL_EXECUTORS: dict[str, ToolExecutor] = {
     "crear_nota": vault_tools.crear_nota,
     "actualizar_nota": vault_tools.actualizar_nota,
     "listar_tareas": vault_tools.listar_tareas,
+    "eliminar_tarea": vault_tools.eliminar_tarea,
 }
 
-# Únicas tools que sobrescriben contenido existente: requieren confirmación explícita
+# Únicas tools que sobrescriben o borran contenido existente: requieren confirmación explícita
 # del usuario antes de ejecutarse (ver docs/ARCHITECTURE.md, protocolo de confirmación).
-DESTRUCTIVE_TOOLS = {"actualizar_nota"}
+DESTRUCTIVE_TOOLS = {"actualizar_nota", "eliminar_tarea"}
 
 
 def load_tool_schemas() -> list[dict]:

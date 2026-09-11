@@ -108,6 +108,43 @@ async def actualizar_nota(argumentos: dict, qdrant_client) -> dict:
     return {"ok": True, "ruta": ruta, "backup": backup_path.relative_to(vault_root()).as_posix()}
 
 
+async def eliminar_tarea(argumentos: dict, qdrant_client) -> dict:
+    """Borra una línea de tarea pendiente (`- [ ] ...`) de una nota, identificada por
+    ruta + texto exacto (las tareas no tienen un id propio, ver `listar_tareas`).
+
+    Solo borra tareas PENDIENTES a propósito (no `- [x]`): si el texto matchea una tarea ya
+    hecha, se lo tratamos como no encontrada en vez de borrar contenido ya completado — pedir
+    "eliminar" una tarea hecha probablemente sea un error del usuario/LLM, no la intención real.
+    """
+    ruta = argumentos["ruta"]
+    texto = argumentos["texto"].strip()
+
+    path = resolve_vault_path(ruta)
+    if not path.is_file():
+        return {"error": f"No existe una nota en '{ruta}'."}
+
+    lineas = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    indice_objetivo = None
+    for i, linea in enumerate(lineas):
+        match = TASK_RE.match(linea)
+        if not match or match.group(1).lower() == "x":
+            continue
+        if match.group(2).strip() == texto:
+            indice_objetivo = i
+            break
+
+    if indice_objetivo is None:
+        return {"error": f"No se encontró una tarea pendiente con el texto {texto!r} en '{ruta}'."}
+
+    backup_path = backup_before_overwrite(path)
+    del lineas[indice_objetivo]
+    path.write_text("".join(lineas), encoding="utf-8")
+    append_audit(
+        "eliminar_tarea", ruta, detail=f"tarea eliminada: {texto!r}; backup en {backup_path.relative_to(vault_root()).as_posix()}"
+    )
+    return {"ok": True, "ruta": ruta, "texto": texto, "backup": backup_path.relative_to(vault_root()).as_posix()}
+
+
 async def listar_tareas(argumentos: dict, qdrant_client) -> dict:
     solo_pendientes = bool(argumentos.get("solo_pendientes", False))
     root = vault_root()

@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "eliminar_tarea",
+    "description": "Borra una tarea PENDIENTE (checkbox de markdown '- [ ]', no '- [x]') de una nota del vault. Operación destructiva: el sistema le pide confirmación explícita al usuario antes de ejecutarla, no hace falta pedirla en el texto de la respuesta. Usá listar_tareas primero si no sabés la ruta o el texto exacto de la tarea.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ruta": {
+          "type": "string",
+          "description": "Ruta relativa al vault de la nota donde está la tarea (la misma que devuelve listar_tareas)."
+        },
+        "texto": {
+          "type": "string",
+          "description": "Texto exacto de la tarea a borrar, tal como aparece después de '- [ ]' (el que devuelve listar_tareas)."
+        }
+      },
+      "required": ["ruta", "texto"]
+    }
+  }
+}
